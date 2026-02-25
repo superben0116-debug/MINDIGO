@@ -668,10 +668,21 @@
 
     async function loadOrders() {
       const res = await fetch("/internal-orders?limit=5000&offset=0");
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const msg = data.detail || data.error || `HTTP ${res.status}`;
+        rowsEl.innerHTML = `<tr><td colspan="${allColumns().length + 1}" style="color:#b91c1c;">加载订单失败：${String(msg)}</td></tr>`;
+        return;
+      }
       rowsEl.innerHTML = "";
       const items = Array.isArray(data.items) ? data.items : mockData;
-      const focused = focusIds.length ? items.filter(x => focusIds.includes(Number(x.id))) : items;
+      let focused = focusIds.length ? items.filter(x => focusIds.includes(Number(x.id))) : items;
+      if (focusIds.length && focused.length === 0 && items.length > 0) {
+        // stale jump focus ids, auto reset to full list
+        focusIds = [];
+        localStorage.removeItem("internalOrderFocusIds");
+        focused = items;
+      }
       lastItems = focused.slice();
       const filtered = applySorting(applyFilters(focused));
       lastFilteredItems = filtered.slice();
