@@ -264,7 +264,7 @@
     const customColumns = JSON.parse(localStorage.getItem("customColumns") || "[]");
     const formulaColumns = JSON.parse(localStorage.getItem("formulaColumns") || "[]");
     const pageParams = new URLSearchParams(location.search);
-    const focusIds = (pageParams.get("ids") || "").split(",").map(x => x.trim()).filter(Boolean).map(x => Number(x)).filter(x => !Number.isNaN(x));
+    let focusIds = (pageParams.get("ids") || "").split(",").map(x => x.trim()).filter(Boolean).map(x => Number(x)).filter(x => !Number.isNaN(x));
     let activeSort = JSON.parse(localStorage.getItem("activeSort") || "null");
     const colFilters = JSON.parse(localStorage.getItem("colFilters") || "{}");
     const savedViews = JSON.parse(localStorage.getItem("savedViews") || "[]");
