@@ -11,7 +11,11 @@ import re
 from typing import Any
 import requests
 import io
-import csv
+import os
+from zoneinfo import ZoneInfo
+from app.xlsx_utils import write_xlsx
+from copy import copy
+from openpyxl import load_workbook
 
 router = APIRouter()
 TEMPLATE_HEADERS = [
@@ -51,6 +55,77 @@ def _to_ymd(v):
     if len(s) >= 10 and s[4] == "-" and s[7] == "-":
         return s[:10]
     return s
+
+
+def _to_zh_weekday(dt: datetime) -> str:
+    return ["周一", "周二", "周三", "周四", "周五", "周六", "周日"][dt.weekday()]
+
+
+def _to_zh_tz(dt: datetime) -> str:
+    return "PDT" if dt.astimezone(ZoneInfo("America/Los_Angeles")).dst() else "PST"
+
+
+def _parse_any_datetime(v):
+    if v is None:
+        return None
+    if isinstance(v, datetime):
+        return v
+    s = str(v).strip()
+    if not s:
+        return None
+    s = s.replace("T", " ").replace("Z", "").strip()
+    s = re.sub(r"\s+", " ", s)
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(s[:19] if fmt.endswith("%S") else s[:10], fmt)
+        except Exception:
+            pass
+    m = re.search(r"(\d{4})-(\d{2})-(\d{2})", s)
+    if m:
+        try:
+            return datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        except Exception:
+            return None
+    return None
+
+
+def _format_zh_date(v):
+    dt = _parse_any_datetime(v)
+    if not dt:
+        return str(v or "").strip()
+    la = dt.replace(tzinfo=ZoneInfo("America/Los_Angeles"))
+    return f"{la.year}年{la.month}月{la.day}日{_to_zh_weekday(la)} {_to_zh_tz(la)}"
+
+
+def _format_zh_date_range(v):
+    s = str(v or "").strip()
+    if not s:
+        return ""
+    if " 到 " in s:
+        a, b = [x.strip() for x in s.split(" 到 ", 1)]
+        return f"{_format_zh_date(a)} 到 {_format_zh_date(b)}"
+    if " - " in s:
+        a, b = [x.strip() for x in s.split(" - ", 1)]
+        return f"{_format_zh_date(a)} 到 {_format_zh_date(b)}"
+    dates = re.findall(r"\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}:\d{2})?", s)
+    if len(dates) >= 2:
+        return f"{_format_zh_date(dates[0])} 到 {_format_zh_date(dates[1])}"
+    if len(dates) == 1:
+        return _format_zh_date(dates[0])
+    return s
+
+
+def _split_product_name_and_code(v: str):
+    s = str(v or "").strip()
+    if not s:
+        return "", ""
+    lines = [x.strip() for x in s.splitlines() if x.strip()]
+    if len(lines) >= 2:
+        return lines[0], lines[1]
+    code = _extract_product_code_segment(s)
+    if code:
+        return s.replace(code, "").strip(), code
+    return s, ""
 
 
 def _build_kapi_url(base_url: str, api_path: str) -> str:
@@ -442,7 +517,9 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
     ids = payload.get("order_ids") if isinstance(payload, dict) else None
     if not isinstance(ids, list) or not ids:
         raise HTTPException(status_code=400, detail="missing order_ids")
-    rows = []
+    flat_orders = []
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
+    template_path = os.path.join(project_root, "docs", "inputs", "internal_orders.xlsx")
     for oid in ids:
         try:
             order_id = int(oid)
@@ -455,56 +532,173 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
         ext = dict(ext_obj.fields or {}) if ext_obj and isinstance(ext_obj.fields, dict) else {}
         items = crud.get_order_items(db, o.id)
         img = (items[0].product_image if items else None) or ext.get("产品图") or ext.get("product_image") or ""
-        row = []
-        for i, h in enumerate(TEMPLATE_HEADERS):
-            v = ""
-            if h == "序列":
-                v = str(len(rows) + 1)
-            elif h == "出单日期":
-                v = _to_ymd(ext.get("出单日期") or o.purchase_time)
-            elif h == "店铺":
-                v = _map_shop_name(ext.get("店铺") or o.shop_name)
-            elif h == "订单编号":
-                v = ext.get("订单编号") or o.platform_order_no or ""
-            elif h == "内部订单号":
-                v = ext.get("内部订单号") or o.internal_order_no or ""
-            elif h == "订单状态":
-                v = _normalize_order_status(ext.get("订单状态") or o.order_status or "")
-            elif h == "产品图":
-                v = img
-            elif h == "产品名":
-                v = ext.get("产品名") or ext.get("product_name") or (items[0].product_name if items else "") or ""
-            elif h == "采购数量":
-                v = ext.get("采购数量") or ext.get("purchase_qty") or (items[0].quantity if items else "") or ""
-            elif h == "单价":
-                v = ext.get("单价") or ext.get("quoted_unit_price") or ""
-            elif h == "售价":
-                v = ext.get("售价") or ext.get("unit_price") or (items[0].unit_price if items else "") or ""
-            elif h == "SKU":
-                v = ext.get("SKU") or ext.get("sku") or (items[0].sku if items else "") or ""
-            elif h == "单号":
-                v = ext.get("单号") or o.tracking_no or ""
-            elif h == "客户地址":
-                v = ext.get("客户地址") or ""
-            elif h == "发货日":
-                v = _to_ymd(ext.get("发货日") or ext.get("latest_ship_date") or ext.get("amz_ship"))
-            elif h == "送达日":
-                v = ext.get("送达日") or ext.get("amz_deliver") or ""
-            else:
-                v = ext.get(h, "")
-            row.append("" if v is None else str(v))
-        rows.append(row)
-    if not rows:
+        product_text = ext.get("产品名") or ext.get("product_name") or (items[0].product_name if items else "") or ""
+        pname_zh, pcode = _split_product_name_and_code(product_text)
+        cm = str(ext.get("厘米") or ext.get("长cm") or "").strip()
+        if not cm:
+            inches = _extract_inches_from_name(pname_zh or product_text)
+            if inches:
+                cm = str(int(round(inches * 2.54)))
+        qty = ext.get("采购数量") or ext.get("purchase_qty") or (items[0].quantity if items else "") or ""
+        delivery = _format_zh_date_range(ext.get("送达日") or ext.get("amz_deliver") or "")
+        ship = _format_zh_date(ext.get("发货日") or ext.get("latest_ship_date") or ext.get("amz_ship"))
+        order_row = {
+            "序列": "",
+            "出单日期": _to_ymd(ext.get("出单日期") or o.purchase_time),
+            "产品图": img,
+            "厘米": cm,
+            "英寸": ext.get("英寸") or "",
+            "区域": ext.get("区域") or "",
+            "工厂内部型号": ext.get("工厂内部型号") or ext.get("internal_factory_no") or "",
+            "店铺": _map_shop_name(ext.get("店铺") or o.shop_name),
+            "订单编号": ext.get("订单编号") or o.platform_order_no or "",
+            "内部订单号": ext.get("内部订单号") or o.internal_order_no or "",
+            "产品名_zh": pname_zh or product_text,
+            "产品名_code": pcode or "",
+            "采购数量": qty,
+            "单价": ext.get("单价") or ext.get("quoted_unit_price") or "",
+            "售价": ext.get("售价") or ext.get("unit_price") or (items[0].unit_price if items else "") or "",
+            "SKU": ext.get("SKU") or ext.get("sku") or (items[0].sku if items else "") or "",
+            "单号": ext.get("单号") or o.tracking_no or "",
+            "客户地址": ext.get("客户地址") or "",
+            "发货日": ship,
+            "送达日": delivery,
+            "订单状态": _normalize_order_status(ext.get("订单状态") or o.order_status or ""),
+            "备注": ext.get("备注") or "水龙头单独打包",
+        }
+        flat_orders.append(order_row)
+    if not flat_orders:
         raise HTTPException(status_code=404, detail="no rows")
+    if not os.path.exists(template_path):
+        # fallback
+        header = TEMPLATE_HEADERS
+        rows = []
+        for i, row_map in enumerate(flat_orders, start=1):
+            row = []
+            for h in header:
+                if h == "序列":
+                    row.append(str(i))
+                elif h == "产品名":
+                    zh = row_map.get("产品名_zh") or ""
+                    code = row_map.get("产品名_code") or ""
+                    row.append(f"{zh}\n{code}".strip())
+                else:
+                    row.append(str(row_map.get(h, "") or ""))
+            rows.append(row)
+        out_path = os.path.join("/tmp", f"internal_orders_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.xlsx")
+        write_xlsx(out_path, header, rows)
+    else:
+        wb = load_workbook(template_path)
+        ws = wb.active
+        # map header index
+        header_map = {}
+        for c in range(1, ws.max_column + 1):
+            key = str(ws.cell(1, c).value or "").strip()
+            if key:
+                header_map[key] = c
+        # use row 2-4 as style template block
+        template_start = 2
+        block_size = 3
+        # clear old merges (except header)
+        old_merges = list(ws.merged_cells.ranges)
+        for mr in old_merges:
+            if mr.min_row >= 2:
+                ws.unmerge_cells(str(mr))
+        # clear old data rows
+        if ws.max_row >= 2:
+            ws.delete_rows(2, ws.max_row - 1)
+        # write all blocks with copied style
+        for idx, data in enumerate(flat_orders, start=1):
+            start_row = 2 + (idx - 1) * block_size
+            # insert 3 rows
+            ws.insert_rows(start_row, amount=block_size)
+            # copy style from original first block kept in memory by loading template again
+            wb_tpl = load_workbook(template_path)
+            ws_tpl = wb_tpl.active
+            for r_off in range(block_size):
+                src_r = template_start + r_off
+                dst_r = start_row + r_off
+                ws.row_dimensions[dst_r].height = ws_tpl.row_dimensions[src_r].height
+                for c in range(1, ws.max_column + 1):
+                    src = ws_tpl.cell(src_r, c)
+                    dst = ws.cell(dst_r, c)
+                    dst._style = copy(src._style)
+                    dst.number_format = src.number_format
+                    dst.font = copy(src.font)
+                    dst.fill = copy(src.fill)
+                    dst.border = copy(src.border)
+                    dst.alignment = copy(src.alignment)
+                    dst.protection = copy(src.protection)
+            # merges from template block with offset
+            for m in ws_tpl.merged_cells.ranges:
+                min_col, min_row, max_col, max_row = m.bounds
+                if min_row >= template_start and max_row <= template_start + block_size - 1:
+                    ws.merge_cells(
+                        start_row=min_row - template_start + start_row,
+                        end_row=max_row - template_start + start_row,
+                        start_column=min_col,
+                        end_column=max_col,
+                    )
+            wb_tpl.close()
+            # common values (merged)
+            def setv(name, value, row=start_row):
+                c = header_map.get(name)
+                if c:
+                    ws.cell(row, c).value = value
 
-    buf = io.StringIO()
-    writer = csv.writer(buf)
-    writer.writerow(TEMPLATE_HEADERS)
-    writer.writerows(rows)
-    content = "\ufeff" + buf.getvalue()
-    filename = f"internal_orders_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"
+            setv("序列", idx)
+            setv("出单日期", data.get("出单日期", ""))
+            setv("产品图", data.get("产品图", ""))
+            setv("厘米", data.get("厘米", ""))
+            setv("英寸", data.get("英寸", ""))
+            setv("区域", data.get("区域", ""))
+            setv("工厂内部型号", data.get("工厂内部型号", ""))
+            setv("店铺", data.get("店铺", ""))
+            setv("订单编号", data.get("订单编号", ""))
+            setv("内部订单号", data.get("内部订单号", ""))
+            setv("采购数量", data.get("采购数量", ""))
+            setv("单价", data.get("单价", ""))
+            setv("售价", data.get("售价", ""))
+            setv("SKU", data.get("SKU", ""))
+            setv("单号", data.get("单号", ""))
+            setv("客户地址", data.get("客户地址", ""))
+            setv("发货日", data.get("发货日", ""))
+            setv("送达日", data.get("送达日", ""))
+            # split lines
+            name_col = header_map.get("产品名")
+            marks_col = header_map.get("箱唛")
+            note_col = header_map.get("备注")
+            image_col = header_map.get("产品图")
+            zh_name = data.get("产品名_zh", "")
+            code = data.get("产品名_code", "")
+            cm = data.get("厘米", "")
+            if name_col:
+                ws.cell(start_row, name_col).value = f"{cm}米柜体" if cm else "柜体"
+                ws.cell(start_row + 1, name_col).value = "LED智能镜柜"
+                ws.cell(start_row + 2, name_col).value = "水槽"
+            if marks_col:
+                ws.cell(start_row, marks_col).value = code
+                ws.cell(start_row + 1, marks_col).value = code
+                ws.cell(start_row + 2, marks_col).value = f"{code} SLT".strip()
+            if note_col:
+                ws.cell(start_row + 1, note_col).value = data.get("备注") or "水龙头单独打包"
+            if image_col:
+                ws.cell(start_row, image_col).value = data.get("产品图", "")
+                ws.cell(start_row + 1, image_col).value = data.get("产品图", "")
+                ws.cell(start_row + 2, image_col).value = data.get("产品图", "")
+
+        # remove trailing empty rows if any
+        while ws.max_row > (1 + len(flat_orders) * block_size):
+            ws.delete_rows(ws.max_row, 1)
+        out_path = os.path.join("/tmp", f"internal_orders_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.xlsx")
+        wb.save(out_path)
+        wb.close()
+
+    with open(out_path, "rb") as f:
+        content = f.read()
+    filename = f"internal_orders_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.xlsx"
     headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
-    return StreamingResponse(io.BytesIO(content.encode("utf-8")), media_type="text/csv; charset=utf-8", headers=headers)
+    return StreamingResponse(io.BytesIO(content), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers=headers)
 
 
 @router.get("/{internal_order_id}")

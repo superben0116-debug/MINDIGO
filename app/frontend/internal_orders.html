@@ -416,9 +416,48 @@
         if (s.length >= 10 && s[4] === "-" && s[7] === "-") return s.slice(0, 10);
         return s;
       }
+      function parseDate(v) {
+        const s = String(v || "").trim().replace("T", " ");
+        if (!s) return null;
+        const m = s.match(/(\d{4})-(\d{2})-(\d{2})/);
+        if (!m) return null;
+        const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+        return Number.isNaN(d.getTime()) ? null : d;
+      }
+      function toCnDate(v) {
+        const d = parseDate(v);
+        if (!d) return String(v || "");
+        const week = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"][d.getDay()];
+        const jan = new Date(d.getFullYear(), 0, 1);
+        const jul = new Date(d.getFullYear(), 6, 1);
+        const stdOffset = Math.max(jan.getTimezoneOffset(), jul.getTimezoneOffset());
+        const tz = d.getTimezoneOffset() < stdOffset ? "PDT" : "PST";
+        return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日${week} ${tz}`;
+      }
+      function toCnRange(v) {
+        const s = String(v || "").trim();
+        if (!s) return "";
+        if (s.includes(" 到 ")) {
+          const p = s.split(" 到 ");
+          return `${toCnDate(p[0])} 到 ${toCnDate(p[1])}`;
+        }
+        if (s.includes(" - ")) {
+          const p = s.split(" - ");
+          return `${toCnDate(p[0])} 到 ${toCnDate(p[1])}`;
+        }
+        const found = s.match(/\d{4}-\d{2}-\d{2}(?:\s+\d{2}:\d{2}:\d{2})?/g) || [];
+        if (found.length >= 2) return `${toCnDate(found[0])} 到 ${toCnDate(found[1])}`;
+        if (found.length === 1) return toCnDate(found[0]);
+        return s;
+      }
       if (dataKey in order) {
         const val = order[dataKey];
-        if (!isEmptyLike(val)) return dataKey === "出单日期" ? toYmd(val) : (dataKey === "店铺" ? mapShop(val) : val);
+        if (!isEmptyLike(val)) {
+          if (dataKey === "出单日期") return toYmd(val);
+          if (dataKey === "发货日") return toCnDate(val);
+          if (dataKey === "送达日") return toCnRange(val);
+          return dataKey === "店铺" ? mapShop(val) : val;
+        }
       }
       if (dataKey === "订单编号" && order.platform_order_no) return order.platform_order_no;
       if (dataKey === "内部订单号" && order.internal_order_no) return order.internal_order_no;
@@ -430,6 +469,8 @@
       const v = ext[dataKey];
       if (isEmptyLike(v)) return "";
       if (dataKey === "出单日期") return toYmd(v);
+      if (dataKey === "发货日") return toCnDate(v);
+      if (dataKey === "送达日") return toCnRange(v);
       if (dataKey === "店铺") return mapShop(v);
       return v;
     }
@@ -562,6 +603,14 @@
     ];
 
     function applyFilters(items) {
+      function extractYmd(v) {
+        const s = String(v || "").trim();
+        if (!s) return "";
+        if (s.length >= 10 && s[4] === "-" && s[7] === "-") return s.slice(0, 10);
+        const m = s.match(/(20\d{2})年(\d{1,2})月(\d{1,2})日/);
+        if (!m) return "";
+        return `${m[1]}-${String(Number(m[2])).padStart(2, "0")}-${String(Number(m[3])).padStart(2, "0")}`;
+      }
       const kw = (document.getElementById("kw").value || "").toLowerCase();
       const start = document.getElementById("startDate").value;
       const end = document.getElementById("endDate").value;
@@ -582,7 +631,7 @@
             if (f.max !== "" && !Number.isNaN(Number(f.max)) && num > Number(f.max)) return false;
           }
           if (f.type === "date") {
-            const date = val.slice(0,10);
+            const date = extractYmd(val);
             if (f.start && date < f.start) return false;
             if (f.end && date > f.end) return false;
           }
@@ -899,7 +948,7 @@
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `internal_orders_${new Date().toISOString().slice(0,10)}.csv`;
+      a.download = `internal_orders_${new Date().toISOString().slice(0,10)}.xlsx`;
       document.body.appendChild(a);
       a.click();
       a.remove();

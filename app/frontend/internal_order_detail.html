@@ -174,8 +174,37 @@
         if (!s || s === "None" || s === "null") return "-";
         return s.length >= 10 && s[4] === "-" && s[7] === "-" ? s.slice(0, 10) : s;
       };
-      const shipDate = fmtYmd(ext["发货日"] || ext.amz_ship || "-");
-      const deliverDate = String(ext["送达日"] || ext.amz_deliver || "-");
+      const toCnDate = (v) => {
+        const s = String(v || "").trim();
+        const m = s.match(/(\d{4})-(\d{2})-(\d{2})/);
+        if (!m) return s || "-";
+        const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+        if (Number.isNaN(d.getTime())) return s || "-";
+        const week = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"][d.getDay()];
+        const jan = new Date(d.getFullYear(), 0, 1);
+        const jul = new Date(d.getFullYear(), 6, 1);
+        const stdOffset = Math.max(jan.getTimezoneOffset(), jul.getTimezoneOffset());
+        const tz = d.getTimezoneOffset() < stdOffset ? "PDT" : "PST";
+        return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日${week} ${tz}`;
+      };
+      const toCnRange = (v) => {
+        const s = String(v || "").trim();
+        if (!s) return "-";
+        if (s.includes(" 到 ")) {
+          const p = s.split(" 到 ");
+          return `${toCnDate(p[0])} 到 ${toCnDate(p[1])}`;
+        }
+        if (s.includes(" - ")) {
+          const p = s.split(" - ");
+          return `${toCnDate(p[0])} 到 ${toCnDate(p[1])}`;
+        }
+        const found = s.match(/\d{4}-\d{2}-\d{2}(?:\s+\d{2}:\d{2}:\d{2})?/g) || [];
+        if (found.length >= 2) return `${toCnDate(found[0])} 到 ${toCnDate(found[1])}`;
+        if (found.length === 1) return toCnDate(found[0]);
+        return s || "-";
+      };
+      const shipDate = toCnDate(ext["发货日"] || ext.amz_ship || "-");
+      const deliverDate = toCnRange(ext["送达日"] || ext.amz_deliver || "-");
       const buyDate = ext["出单日期"] || ext.purchase_date_local || "-";
       metaEl.innerHTML = `
         <div><span class="label">发货日期</span><div>${shipDate}</div></div>
