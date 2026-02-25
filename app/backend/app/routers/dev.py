@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from app.db import SessionLocal
 from app import crud
 from datetime import datetime
+import requests
 
 router = APIRouter()
 
@@ -48,3 +49,32 @@ def seed_data(db: Session = Depends(get_db)):
         "weight_kg": 45.5,
     })
     return {"order_id": order.id}
+
+
+@router.get("/egress-ip")
+def egress_ip():
+    providers = [
+        "https://api.ipify.org?format=json",
+        "https://ifconfig.me/all.json",
+        "https://ipinfo.io/json",
+    ]
+    out = {"ok": False, "providers": []}
+    for u in providers:
+        try:
+            r = requests.get(u, timeout=10)
+            txt = r.text
+            ip = ""
+            if r.headers.get("content-type", "").startswith("application/json"):
+                js = r.json()
+                ip = str(js.get("ip") or js.get("ip_addr") or js.get("address") or "")
+            if not ip and txt:
+                ip = txt.strip().split("\n")[0].strip()
+            row = {"url": u, "status": r.status_code, "ip": ip}
+            out["providers"].append(row)
+            if ip:
+                out["ok"] = True
+                out["ip"] = ip
+                return out
+        except Exception as e:
+            out["providers"].append({"url": u, "error": str(e)})
+    return out

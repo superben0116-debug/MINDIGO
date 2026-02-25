@@ -86,6 +86,12 @@ def sync_orders(db: Session = Depends(get_db)):
     return {"job_id": job.id, "status": "queued"}
 
 
+@router.get("/sync-fbm-orders")
+def sync_orders_get(db: Session = Depends(get_db)):
+    # Convenience endpoint so browser direct open can also trigger sync.
+    return sync_orders(db)
+
+
 @router.post("/create-manual-order")
 def create_manual_order_api(payload: dict, db: Session = Depends(get_db)):
     platform_code = payload.get("platform_code")
