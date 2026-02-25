@@ -1119,7 +1119,12 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
     with open(out_path, "rb") as f:
         content = f.read()
     filename = f"internal_orders_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.xlsx"
-    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+    headers = {
+        "Content-Disposition": f'attachment; filename="{filename}"',
+        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+        "Pragma": "no-cache",
+        "Expires": "0",
+    }
     return StreamingResponse(io.BytesIO(content), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers=headers)
 
 

@@ -978,6 +978,7 @@
       const res = await fetch("/internal-orders/export-selected", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        cache: "no-store",
         body: JSON.stringify({ order_ids: ids }),
       });
       if (!res.ok) {
@@ -989,7 +990,9 @@
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `internal_orders_${new Date().toISOString().slice(0,10)}.xlsx`;
+      const cd = res.headers.get("Content-Disposition") || "";
+      const m = cd.match(/filename=\"?([^\";]+)\"?/i);
+      a.download = m && m[1] ? m[1] : `internal_orders_${new Date().toISOString().replace(/[:.]/g, "-")}.xlsx`;
       document.body.appendChild(a);
       a.click();
       a.remove();
