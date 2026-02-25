@@ -31,7 +31,7 @@ def sync_status(db: Session = Depends(get_db)):
     ready = bool(app_id and app_secret and sid_list and app_id not in placeholder and app_secret not in placeholder)
     latest = (
         db.query(models.ImportJob)
-        .filter(models.ImportJob.source == "lingxing_fbm")
+        .filter(models.ImportJob.job_type == "lingxing_fbm")
         .order_by(models.ImportJob.id.desc())
         .first()
     )

@@ -58,7 +58,7 @@ def _auto_sync_loop():
                 running = (
                     db.query(models.ImportJob.id)
                     .filter(
-                        models.ImportJob.source == "lingxing_fbm",
+                        models.ImportJob.job_type == "lingxing_fbm",
                         models.ImportJob.status.in_(["queued", "running"]),
                     )
                     .first()
