@@ -80,6 +80,7 @@
           <h1>内部订单中心</h1>
           <div style="display:flex;gap:8px;">
             <button class="btn" id="exportBtn">导出卡派</button>
+            <button class="btn" id="downloadBtn" style="background:#0f766e;">下载订单</button>
           </div>
         </div>
 
@@ -195,6 +196,7 @@
   <script>
     const rowsEl = document.getElementById("orderRows");
     const exportBtn = document.getElementById("exportBtn");
+    const downloadBtn = document.getElementById("downloadBtn");
     const headerRow = document.getElementById("headerRow");
     const filterBtn = document.getElementById("filterBtn");
     const todayChip = document.getElementById("todayChip");
@@ -392,19 +394,43 @@
         return parts.length > 0 && parts.every(p => p === "none" || p === "null" || p === "nan");
       }
       const dataKey = col.dataKey || col.key;
+      function mapShop(v) {
+        const m = {
+          "NAIROLET-US": "亚丰源",
+          "煌明科技-US": "煌明",
+          "简丽欧-US": "简丽欧",
+          "晨阳铺货A-US": "晨阳",
+          "TIZAZO-US": "口福轩",
+          "Kadaligh-US": "维利安",
+          "口服轩-CA": "口福轩",
+          "爱瑞柔-US": "爱瑞柔",
+          "路蔻尔-US": "路蔻尔",
+          "聚乐-US": "聚乐",
+          "译文-US": "译文",
+        };
+        return m[String(v || "").trim()] || v || "";
+      }
+      function toYmd(v) {
+        const s = String(v || "").trim();
+        if (!s) return "";
+        if (s.length >= 10 && s[4] === "-" && s[7] === "-") return s.slice(0, 10);
+        return s;
+      }
       if (dataKey in order) {
         const val = order[dataKey];
-        if (!isEmptyLike(val)) return val;
+        if (!isEmptyLike(val)) return dataKey === "出单日期" ? toYmd(val) : (dataKey === "店铺" ? mapShop(val) : val);
       }
       if (dataKey === "订单编号" && order.platform_order_no) return order.platform_order_no;
       if (dataKey === "内部订单号" && order.internal_order_no) return order.internal_order_no;
-      if (dataKey === "店铺" && order.shop_name) return order.shop_name;
+      if (dataKey === "店铺" && order.shop_name) return mapShop(order.shop_name);
       if (dataKey === "订单状态" && order.order_status) return order.order_status;
       if (dataKey === "单号" && order.tracking_no) return order.tracking_no;
-      if (dataKey === "出单日期" && order.purchase_time) return order.purchase_time;
+      if (dataKey === "出单日期" && order.purchase_time) return toYmd(order.purchase_time);
       const ext = order.ext || {};
       const v = ext[dataKey];
       if (isEmptyLike(v)) return "";
+      if (dataKey === "出单日期") return toYmd(v);
+      if (dataKey === "店铺") return mapShop(v);
       return v;
     }
 
@@ -851,6 +877,33 @@
       } catch (_) {}
       localStorage.setItem("kapi_ids", ids.join(","));
       location.href = `/ui/kapi_export.html?ids=${ids.join(",")}`;
+    });
+
+    downloadBtn.addEventListener("click", async () => {
+      const ids = Array.from(document.querySelectorAll(".order-check:checked")).map((x) => parseInt(x.value, 10));
+      if (ids.length === 0) {
+        alert("请先勾选订单");
+        return;
+      }
+      const res = await fetch("/internal-orders/export-selected", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ order_ids: ids }),
+      });
+      if (!res.ok) {
+        const out = await res.json().catch(() => ({}));
+        alert(`下载失败：${out.detail || res.status}`);
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `internal_orders_${new Date().toISOString().slice(0,10)}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
     });
 
     function applyGroupView(groupKey) {

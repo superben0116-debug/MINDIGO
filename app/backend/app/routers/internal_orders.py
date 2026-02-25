@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from app.db import SessionLocal
 from app import crud, models
@@ -9,8 +10,47 @@ from datetime import datetime
 import re
 from typing import Any
 import requests
+import io
+import csv
 
 router = APIRouter()
+TEMPLATE_HEADERS = [
+    "序列","出单日期","产品图","厘米","英寸","区域","工厂内部型号","包装/尾程方式","货款已付","店铺","订单编号","内部订单号","产品名","供应商","采购数量","单价","总价","1688运输单号","下单日期","供应商出货日期","到花街日期","开船日期","到港日期","单号","头程","尾程","套数","每箱套数","总箱数","货代箱规","计费重量","花街单价","头程运费总价","包材费","出库费","国内运费","其他","每套运费成本","毛重小于68kg","长cm","宽cm","高cm","长in＜80","宽in","高in","镑重量＜150lb","自算计费重","客户地址","联邦方式","联邦单号","联邦美金","反弹","反弹退回","购买配送","联邦人民币","总成本","回款","利润","售价","被退款","索赔额","SKU","发货日","送达日","卡派后台单号","oversize 130及165","周长＜419","出货图","POD","签收图","其他","快递/卡派账单月份"
+]
+
+SHOP_NAME_MAP = {
+    "NAIROLET-US": "亚丰源",
+    "煌明科技-US": "煌明",
+    "简丽欧-US": "简丽欧",
+    "晨阳铺货A-US": "晨阳",
+    "TIZAZO-US": "口福轩",
+    "Kadaligh-US": "维利安",
+    "口服轩-CA": "口福轩",
+    "爱瑞柔-US": "爱瑞柔",
+    "路蔻尔-US": "路蔻尔",
+    "聚乐-US": "聚乐",
+    "译文-US": "译文",
+}
+
+
+def _map_shop_name(v: str | None) -> str:
+    raw = str(v or "").strip()
+    if not raw:
+        return ""
+    return SHOP_NAME_MAP.get(raw, raw)
+
+
+def _to_ymd(v):
+    if v is None:
+        return ""
+    if isinstance(v, datetime):
+        return v.strftime("%Y-%m-%d")
+    s = str(v).strip()
+    if not s:
+        return ""
+    if len(s) >= 10 and s[4] == "-" and s[7] == "-":
+        return s[:10]
+    return s
 
 
 def _build_kapi_url(base_url: str, api_path: str) -> str:
@@ -262,11 +302,16 @@ def list_internal_orders(limit: int = 50, offset: int = 0, db: Session = Depends
         product_image = product_image or ext_img
         # map to template headers
         if o.purchase_time and not ext_fields.get("出单日期"):
-            ext_fields["出单日期"] = o.purchase_time.strftime("%Y-%m-%d %H:%M:%S")
+            ext_fields["出单日期"] = _to_ymd(o.purchase_time)
+        elif ext_fields.get("出单日期"):
+            ext_fields["出单日期"] = _to_ymd(ext_fields.get("出单日期"))
         if product_image and not ext_fields.get("产品图"):
             ext_fields["产品图"] = product_image
-        if o.shop_name and not ext_fields.get("店铺"):
-            ext_fields["店铺"] = o.shop_name
+        mapped_shop = _map_shop_name(o.shop_name)
+        if mapped_shop and not ext_fields.get("店铺"):
+            ext_fields["店铺"] = mapped_shop
+        elif ext_fields.get("店铺"):
+            ext_fields["店铺"] = _map_shop_name(ext_fields.get("店铺"))
         if o.platform_order_no and not ext_fields.get("订单编号"):
             ext_fields["订单编号"] = o.platform_order_no
         if o.internal_order_no and not ext_fields.get("内部订单号"):
@@ -368,10 +413,10 @@ def list_internal_orders(limit: int = 50, offset: int = 0, db: Session = Depends
             "id": o.id,
             "internal_order_no": o.internal_order_no,
             "platform_order_no": o.platform_order_no,
-            "shop_name": o.shop_name,
+            "shop_name": mapped_shop,
             "order_status": _normalize_order_status(o.order_status),
             "tracking_no": o.tracking_no,
-            "purchase_time": o.purchase_time,
+            "purchase_time": _to_ymd(o.purchase_time),
             "ext": ext_fields,
             "product_image": product_image,
             "packages": [
@@ -390,6 +435,76 @@ def list_internal_orders(limit: int = 50, offset: int = 0, db: Session = Depends
             ],
         })
     return {"items": items, "total": len(orders)}
+
+
+@router.post("/export-selected")
+def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
+    ids = payload.get("order_ids") if isinstance(payload, dict) else None
+    if not isinstance(ids, list) or not ids:
+        raise HTTPException(status_code=400, detail="missing order_ids")
+    rows = []
+    for oid in ids:
+        try:
+            order_id = int(oid)
+        except Exception:
+            continue
+        o = crud.get_internal_order(db, order_id)
+        if not o:
+            continue
+        ext_obj = crud.get_order_ext(db, o.id)
+        ext = dict(ext_obj.fields or {}) if ext_obj and isinstance(ext_obj.fields, dict) else {}
+        items = crud.get_order_items(db, o.id)
+        img = (items[0].product_image if items else None) or ext.get("产品图") or ext.get("product_image") or ""
+        row = []
+        for i, h in enumerate(TEMPLATE_HEADERS):
+            v = ""
+            if h == "序列":
+                v = str(len(rows) + 1)
+            elif h == "出单日期":
+                v = _to_ymd(ext.get("出单日期") or o.purchase_time)
+            elif h == "店铺":
+                v = _map_shop_name(ext.get("店铺") or o.shop_name)
+            elif h == "订单编号":
+                v = ext.get("订单编号") or o.platform_order_no or ""
+            elif h == "内部订单号":
+                v = ext.get("内部订单号") or o.internal_order_no or ""
+            elif h == "订单状态":
+                v = _normalize_order_status(ext.get("订单状态") or o.order_status or "")
+            elif h == "产品图":
+                v = img
+            elif h == "产品名":
+                v = ext.get("产品名") or ext.get("product_name") or (items[0].product_name if items else "") or ""
+            elif h == "采购数量":
+                v = ext.get("采购数量") or ext.get("purchase_qty") or (items[0].quantity if items else "") or ""
+            elif h == "单价":
+                v = ext.get("单价") or ext.get("quoted_unit_price") or ""
+            elif h == "售价":
+                v = ext.get("售价") or ext.get("unit_price") or (items[0].unit_price if items else "") or ""
+            elif h == "SKU":
+                v = ext.get("SKU") or ext.get("sku") or (items[0].sku if items else "") or ""
+            elif h == "单号":
+                v = ext.get("单号") or o.tracking_no or ""
+            elif h == "客户地址":
+                v = ext.get("客户地址") or ""
+            elif h == "发货日":
+                v = _to_ymd(ext.get("发货日") or ext.get("latest_ship_date") or ext.get("amz_ship"))
+            elif h == "送达日":
+                v = ext.get("送达日") or ext.get("amz_deliver") or ""
+            else:
+                v = ext.get(h, "")
+            row.append("" if v is None else str(v))
+        rows.append(row)
+    if not rows:
+        raise HTTPException(status_code=404, detail="no rows")
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(TEMPLATE_HEADERS)
+    writer.writerows(rows)
+    content = "\ufeff" + buf.getvalue()
+    filename = f"internal_orders_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"
+    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+    return StreamingResponse(io.BytesIO(content.encode("utf-8")), media_type="text/csv; charset=utf-8", headers=headers)
 
 
 @router.get("/{internal_order_id}")
@@ -423,10 +538,10 @@ def get_internal_order(internal_order_id: int, db: Session = Depends(get_db)):
         "id": order.id,
         "internal_order_no": order.internal_order_no,
         "platform_order_no": order.platform_order_no,
-        "shop_name": order.shop_name,
+        "shop_name": _map_shop_name(order.shop_name),
         "order_status": _normalize_order_status(order.order_status),
         "tracking_no": order.tracking_no,
-        "purchase_time": order.purchase_time,
+        "purchase_time": _to_ymd(order.purchase_time),
         "ext": detail_ext,
         "items": item_payload,
         "packages": [
