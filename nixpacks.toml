@@ -1,0 +1,10 @@
+[variables]
+PYTHONUNBUFFERED = "1"
+
+[phases.install]
+cmds = [
+  "cd app/backend && pip install -r requirements.txt"
+]
+
+[start]
+cmd = "cd app/backend && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"
