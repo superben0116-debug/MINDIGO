@@ -203,6 +203,57 @@ def _derive_inches_text(cm_val, product_text: str):
     return ""
 
 
+def _enrich_groups_with_mws_detail(groups: list, detail_obj: dict):
+    if not groups or not isinstance(detail_obj, dict):
+        return groups
+    item_list = detail_obj.get("item_list") or []
+    if not isinstance(item_list, list) or not item_list:
+        return groups
+    detail_rows = []
+    for d in item_list:
+        if not isinstance(d, dict):
+            continue
+        sku = str(d.get("seller_sku") or d.get("sku") or d.get("local_sku") or "").strip()
+        title = str(d.get("title") or d.get("product_name") or d.get("local_name") or "").strip()
+        unit = d.get("unit_price_amount")
+        if unit in (None, "", 0, "0", "0.0", "0.00"):
+            item_price = d.get("item_price_amount")
+            qty = d.get("quantity_ordered") or d.get("quantity") or 1
+            try:
+                unit = float(item_price) / max(float(qty), 1.0)
+            except Exception:
+                unit = None
+        detail_rows.append({"sku": sku, "title": title, "unit": unit})
+
+    used = set()
+    for g in groups:
+        sku = str(g.get("sku") or "").strip()
+        # 1) exact sku match
+        idx = -1
+        if sku:
+            for i, d in enumerate(detail_rows):
+                if i in used:
+                    continue
+                if str(d.get("sku") or "").strip() and str(d.get("sku")).strip() == sku:
+                    idx = i
+                    break
+        # 2) fallback first unused
+        if idx < 0:
+            for i, _ in enumerate(detail_rows):
+                if i not in used:
+                    idx = i
+                    break
+        if idx < 0:
+            continue
+        used.add(idx)
+        pick = detail_rows[idx]
+        if g.get("unit_price") in (None, "", 0, "0", "0.0", "0.00") and pick.get("unit") not in (None, ""):
+            g["unit_price"] = pick.get("unit")
+        if (not str(g.get("product_name") or "").strip()) and str(pick.get("title") or "").strip():
+            g["product_name"] = pick.get("title")
+    return groups
+
+
 def _inches_number(v: str):
     s = str(v or "").strip().lower()
     m = re.search(r"(\d+(?:\.\d+)?)\s*in", s)
@@ -480,6 +531,10 @@ def _extract_kapi_order_no(fields: dict) -> str:
 def list_internal_orders(limit: int = 50, offset: int = 0, db: Session = Depends(get_db)):
     orders = crud.list_internal_orders(db, limit=limit, offset=offset)
     items = []
+    cfg = get_lingxing_config()
+    app_id = str(cfg.get("app_id") or cfg.get("APP_ID") or "").strip()
+    app_secret = str(cfg.get("app_secret") or cfg.get("APP_SECRET") or "").strip()
+    _mws_token = None
     for o in orders:
         ext_obj = crud.get_order_ext(db, o.id)
         ext_fields = ext_obj.fields if ext_obj else {}
@@ -516,6 +571,23 @@ def list_internal_orders(limit: int = 50, offset: int = 0, db: Session = Depends
                 else:
                     _g[k]["quantity"] = int(_g[k].get("quantity") or 0) + int(it.quantity or 0)
             grouped_lines = list(_g.values())
+            # 多SKU时优先用 mws/orderDetail 补齐每条SKU售价/标题
+            try:
+                need_enrich = len(grouped_lines) > 1 and any(
+                    (ln.get("unit_price") in (None, "", 0, "0", "0.0", "0.00") or not str(ln.get("product_name") or "").strip())
+                    for ln in grouped_lines
+                )
+                if need_enrich and app_id and app_secret and o.platform_order_no:
+                    if not _mws_token:
+                        tk = get_access_token(app_id, app_secret)
+                        if tk.get("code") == 0:
+                            _mws_token = tk.get("data", {}).get("access_token")
+                    if _mws_token:
+                        det = get_mws_order_detail(_mws_token, app_id, o.platform_order_no)
+                        if det.get("code") == 0 and det.get("data"):
+                            grouped_lines = _enrich_groups_with_mws_detail(grouped_lines, det.get("data")[0] or {})
+            except Exception:
+                pass
         if ext_fields.get("latest_ship_date") and not ext_fields.get("amz_ship"):
             ext_fields["amz_ship"] = ext_fields.get("latest_ship_date")
         if (ext_fields.get("earliest_delivery_date") or ext_fields.get("latest_delivery_date")) and not ext_fields.get("amz_deliver"):
@@ -688,6 +760,10 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
         os.path.join(project_root, "app", "docs", "inputs", "internal_orders.xlsx"),
     ]
     template_path = next((p for p in template_candidates if os.path.exists(p)), template_candidates[1])
+    cfg = get_lingxing_config()
+    app_id = str(cfg.get("app_id") or cfg.get("APP_ID") or "").strip()
+    app_secret = str(cfg.get("app_secret") or cfg.get("APP_SECRET") or "").strip()
+    _mws_token = None
     for oid in ids:
         try:
             order_id = int(oid)
@@ -715,6 +791,24 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
                 else:
                     # 同 SKU 合并数量
                     g["qty"] = int(g.get("qty") or 0) + int(it.quantity or 0)
+            try:
+                need_enrich = len(grouped) > 1 and any(
+                    (x.get("unit_price") in (None, "", 0, "0", "0.0", "0.00") or not str(x.get("product_name") or "").strip())
+                    for x in grouped.values()
+                )
+                if need_enrich and app_id and app_secret and o.platform_order_no:
+                    if not _mws_token:
+                        tk = get_access_token(app_id, app_secret)
+                        if tk.get("code") == 0:
+                            _mws_token = tk.get("data", {}).get("access_token")
+                    if _mws_token:
+                        det = get_mws_order_detail(_mws_token, app_id, o.platform_order_no)
+                        if det.get("code") == 0 and det.get("data"):
+                            gl = list(grouped.values())
+                            gl = _enrich_groups_with_mws_detail(gl, det.get("data")[0] or {})
+                            grouped = {str(x.get("sku") or f'__NO_SKU__{i}'): x for i, x in enumerate(gl, start=1)}
+            except Exception:
+                pass
         else:
             grouped["__EXT__"] = {
                 "sku": str(ext.get("SKU") or ext.get("sku") or "").strip(),
