@@ -4,6 +4,7 @@ from sqlalchemy import text
 from app.db import SessionLocal
 from app import crud
 from app.address_mapping import default_address_mapping
+from app.interface_registry import default_interface_registry
 
 router = APIRouter()
 
@@ -22,11 +23,13 @@ def get_all_config(db: Session = Depends(get_db)):
     shipper = crud.get_config(db, "shipper")
     lingxing = crud.get_config(db, "lingxing")
     kapi = crud.get_config(db, "kapi")
+    interfaces = crud.get_config(db, "interface_registry")
     return {
         "address_mapping": addr.config_value if addr else default_address_mapping(),
         "shipper": shipper.config_value if shipper else {},
         "lingxing": lingxing.config_value if lingxing else {},
         "kapi": kapi.config_value if kapi else {},
+        "interface_registry": interfaces.config_value if interfaces else default_interface_registry(),
     }
 
 
@@ -69,6 +72,18 @@ def get_kapi_config(db: Session = Depends(get_db)):
 @router.put("/kapi")
 def set_kapi(payload: dict, db: Session = Depends(get_db)):
     obj = crud.set_config(db, "kapi", payload)
+    return {"key": obj.config_key, "value": obj.config_value}
+
+
+@router.get("/interface-registry")
+def get_interface_registry(db: Session = Depends(get_db)):
+    cfg = crud.get_config(db, "interface_registry")
+    return cfg.config_value if cfg else default_interface_registry()
+
+
+@router.put("/interface-registry")
+def set_interface_registry(payload: dict, db: Session = Depends(get_db)):
+    obj = crud.set_config(db, "interface_registry", payload)
     return {"key": obj.config_key, "value": obj.config_value}
 
 

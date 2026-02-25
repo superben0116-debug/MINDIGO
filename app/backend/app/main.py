@@ -11,6 +11,7 @@ from fastapi.responses import RedirectResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from app.auth import get_current_user_optional, ensure_default_admin
 from app.services import execute_sync_job
+from app.interface_registry import default_interface_registry
 from app.routers.internal_orders import router as internal_orders_router
 from app.routers.supplier_quotes import router as supplier_quotes_router
 from app.routers.kapi_exports import router as kapi_exports_router
@@ -128,6 +129,8 @@ def startup():
     db = SessionLocal()
     try:
         ensure_default_admin(db)
+        if not crud.get_config(db, "interface_registry"):
+            crud.set_config(db, "interface_registry", default_interface_registry())
     finally:
         db.close()
     global _auto_sync_started
