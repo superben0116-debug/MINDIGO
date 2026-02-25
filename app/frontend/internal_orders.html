@@ -667,7 +667,7 @@
     }
 
     async function loadOrders() {
-      const res = await fetch("/internal-orders?limit=5000&offset=0");
+      const res = await fetch("/internal-orders/?limit=5000&offset=0");
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         const msg = data.detail || data.error || `HTTP ${res.status}`;
@@ -940,7 +940,7 @@
     }
 
     document.getElementById("addRowBtn").addEventListener("click", async () => {
-      const res = await fetch("/internal-orders", { method: "POST" });
+      const res = await fetch("/internal-orders/", { method: "POST" });
       const data = await res.json();
       if (data.id) loadOrders();
     });

@@ -444,12 +444,12 @@
       if (supplier) q.set("supplier_name", supplier);
       if (kw) q.set("keyword", kw);
       if (st) q.set("status", st);
-      const res = await fetch(`/supplier-quotes?${q.toString()}`);
+      const res = await fetch(`/supplier-quotes/?${q.toString()}`);
       const data = await res.json();
       listRowsCache = data.items || [];
       let rows = data.items || [];
       if (!rows.length && supplier) {
-        const allRes = await fetch(`/supplier-quotes`);
+        const allRes = await fetch(`/supplier-quotes/`);
         const allData = await allRes.json();
         const allRows = allData.items || [];
         alert(`调试：当前供应商【${supplier}】匹配 0 条；系统总报价单 ${allRows.length} 条。请检查“供应商登录名”是否与推送时一致。`);
