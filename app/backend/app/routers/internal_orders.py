@@ -217,6 +217,14 @@ def _inches_number(v: str):
         return None
 
 
+def _cm_number(v: str):
+    s = str(v or "").strip().lower().replace("cm", "")
+    try:
+        return float(s)
+    except Exception:
+        return None
+
+
 def _download_image_to_file(url: str, cache_dir: str):
     u = str(url or "").strip()
     # Amazon thumbnail -> large image
@@ -546,6 +554,9 @@ def list_internal_orders(limit: int = 50, offset: int = 0, db: Session = Depends
             ext_fields["单价"] = ext_fields.get("quoted_unit_price")
         if ext_fields.get("单价（元）") and not ext_fields.get("单价"):
             ext_fields["单价"] = ext_fields.get("单价（元）")
+        # 单价由供应商报价回填，内部订单默认不自动填
+        if ext_fields.get("单价") in (None, "", "0", 0, "0.0", "0.00"):
+            ext_fields["单价"] = ""
         if (ext_fields.get("total_price") or ext_fields.get("总价")) and not ext_fields.get("总价"):
             ext_fields["总价"] = ext_fields.get("total_price")
         if o.tracking_no and not ext_fields.get("单号"):
@@ -756,6 +767,10 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
                 cm = str(ext.get("厘米") or ext.get("长cm") or "").strip()
             inches_text = in_from_name or str(ext.get("英寸") or "").strip() or _derive_inches_text(cm, product_text)
             product_full = (f"{(pname_zh or product_text).strip()}\n{str(pcode or '').strip()}").strip()
+            if product_full and not re.search(r"\n[A-Z0-9]{4,}-", product_full, flags=re.I):
+                fallback_code = _extract_product_code_segment(product_full) or pcode
+                if fallback_code:
+                    product_full = f"{product_full.splitlines()[0]}\n{fallback_code}"
             qty = g.get("qty") or ext.get("采购数量") or ext.get("purchase_qty") or ""
             img = g.get("image") or ext.get("产品图") or ext.get("product_image") or ""
             order_row = {
@@ -773,7 +788,7 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
                 "产品名_code": pcode or "",
                 "产品名_full": product_full,
                 "采购数量": qty,
-                "单价": ext.get("单价") or ext.get("quoted_unit_price") or "",
+                "单价": "",
                 "售价": ext.get("售价") or ext.get("unit_price") or g.get("unit_price") or "",
                 "SKU": g.get("sku") or ext.get("SKU") or ext.get("sku") or "",
                 "单号": ext.get("单号") or o.tracking_no or "",
@@ -860,7 +875,8 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
         current_row = 2
         for idx, data in enumerate(flat_orders, start=1):
             inc = _inches_number(data.get("英寸"))
-            use_4 = bool(inc is not None and inc <= 36 and template_start_4 is not None)
+            cmn = _cm_number(data.get("厘米"))
+            use_4 = bool(template_start_4 is not None and ((inc is not None and inc <= 36) or (cmn is not None and cmn <= 91.44)))
             block_size = 4 if use_4 else 3
             src_start = template_start_4 if use_4 else template_start_3
             start_row = current_row
