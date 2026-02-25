@@ -1,13 +1,16 @@
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 import os
+import threading
+import time
 from app.db import Base, engine
 from app.db import SessionLocal
-from app import models
+from app import models, crud
 from fastapi.responses import JSONResponse
 from fastapi.responses import RedirectResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from app.auth import get_current_user_optional, ensure_default_admin
+from app.services import execute_sync_job
 from app.routers.internal_orders import router as internal_orders_router
 from app.routers.supplier_quotes import router as supplier_quotes_router
 from app.routers.kapi_exports import router as kapi_exports_router
@@ -19,6 +22,42 @@ from app.routers.import_jobs import router as import_jobs_router
 from app.routers.auth import router as auth_router
 
 app = FastAPI(title="Ultimate ERP")
+_auto_sync_started = False
+
+
+def _is_truthy(v: str | None) -> bool:
+    return str(v or "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _auto_sync_loop():
+    interval_min = int(os.getenv("ERP_AUTO_SYNC_INTERVAL_MINUTES", "30") or "30")
+    if interval_min < 5:
+        interval_min = 5
+    while True:
+        db = SessionLocal()
+        try:
+            cfg = crud.get_config(db, "lingxing")
+            lxcfg = cfg.config_value if cfg and isinstance(cfg.config_value, dict) else {}
+            app_id = str(lxcfg.get("app_id") or "").strip()
+            app_secret = str(lxcfg.get("app_secret") or "").strip()
+            sid_list = str(lxcfg.get("sid_list") or "").strip()
+            if app_id and app_secret and sid_list:
+                running = (
+                    db.query(models.ImportJob.id)
+                    .filter(
+                        models.ImportJob.source == "lingxing_fbm",
+                        models.ImportJob.status.in_(["queued", "running"]),
+                    )
+                    .first()
+                )
+                if not running:
+                    job = crud.create_import_job(db, "lingxing_fbm")
+                    execute_sync_job(job.id)
+        except Exception:
+            pass
+        finally:
+            db.close()
+        time.sleep(interval_min * 60)
 
 
 class UINoCacheMiddleware(BaseHTTPMiddleware):
@@ -91,6 +130,13 @@ def startup():
         ensure_default_admin(db)
     finally:
         db.close()
+    global _auto_sync_started
+    if _auto_sync_started:
+        return
+    if _is_truthy(os.getenv("ERP_AUTO_SYNC_ENABLED", "1")):
+        t = threading.Thread(target=_auto_sync_loop, daemon=True)
+        t.start()
+        _auto_sync_started = True
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
