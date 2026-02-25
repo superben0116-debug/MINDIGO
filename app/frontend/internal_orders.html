@@ -714,9 +714,11 @@
           const ext = { ...(o.ext || {}) };
           ext["SKU"] = g.sku || ext["SKU"] || "";
           ext["采购数量"] = g.quantity || ext["采购数量"] || "";
-          const extName = String(ext["产品名"] || "").trim();
-          const hasCode = /\n[A-Z0-9]{4,}-/i.test(extName);
-          if (!hasCode && g.product_name) ext["产品名"] = g.product_name;
+          if (g["产品名"]) ext["产品名"] = g["产品名"];
+          else if (g.product_name) ext["产品名"] = g.product_name;
+          if (g["厘米"]) ext["厘米"] = g["厘米"];
+          if (g["英寸"]) ext["英寸"] = g["英寸"];
+          if (g.unit_price !== undefined && g.unit_price !== null && g.unit_price !== "") ext["售价"] = g.unit_price;
           const row = {
             ...o,
             _base_id: o.id,

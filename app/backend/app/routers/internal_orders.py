@@ -132,6 +132,57 @@ def _split_product_name_and_code(v: str):
     return s, ""
 
 
+def _extract_cm_in_from_text(text: str):
+    s = str(text or "").lower()
+    # inch explicit
+    m = re.search(r"(\d+(?:\.\d+)?)\s*(?:in|inch|inches|英寸|''|\")", s)
+    if m:
+        try:
+            inch = float(m.group(1))
+            cm = inch * 2.54
+            return str(int(round(cm))), f"{int(round(inch))}in"
+        except Exception:
+            pass
+    # cm explicit
+    m = re.search(r"(\d+(?:\.\d+)?)\s*(?:cm|厘米)\b", s)
+    if m:
+        try:
+            cm = float(m.group(1))
+            inch = cm / 2.54
+            return str(int(round(cm))), f"{int(round(inch))}in"
+        except Exception:
+            pass
+    # encoded meter
+    m = re.search(r"-(\d+(?:\.\d+)?)m\b", s)
+    if m:
+        try:
+            cm = float(m.group(1)) * 100
+            inch = cm / 2.54
+            return str(int(round(cm))), f"{int(round(inch))}in"
+        except Exception:
+            pass
+    # encoded cm
+    m = re.search(r"-(\d+(?:\.\d+)?)cm\b", s)
+    if m:
+        try:
+            cm = float(m.group(1))
+            inch = cm / 2.54
+            return str(int(round(cm))), f"{int(round(inch))}in"
+        except Exception:
+            pass
+    return "", ""
+
+
+def _normalized_product_full(raw_name: str, platform_order_no: str, ext_fields: dict):
+    raw = str(raw_name or "").strip()
+    if not raw:
+        return ""
+    if re.search(r"\n[A-Z0-9]{4,}-", raw, flags=re.I):
+        return raw
+    derived = _derive_cn_product_name(raw, platform_order_no, ext_fields or {})
+    return derived or raw
+
+
 def _extract_zip_from_address(addr: str):
     s = str(addr or "")
     m = re.search(r"\b(\d{5})(?:-\d{4})?\b", s)
@@ -258,16 +309,32 @@ def _extract_inches_from_name(name: str):
     for m in re.finditer(r"(\d+(?:\.\d+)?)\s*(?:in|inch|inches|英寸|''|\")", text):
         try:
             v = float(m.group(1))
-            if v >= 20:
+            if v > 0:
                 vals.append(v)
         except Exception:
             pass
+    # cm -> in
     if not vals:
-        for m in re.finditer(r"(\d+(?:\.\d+)?)", text):
+        for m in re.finditer(r"(\d+(?:\.\d+)?)\s*(?:cm|厘米)", text):
             try:
-                v = float(m.group(1))
-                if v >= 20:
-                    vals.append(v)
+                cmv = float(m.group(1))
+                if cmv > 0:
+                    vals.append(cmv / 2.54)
+            except Exception:
+                pass
+    # code like -1.37m / -90cm
+    if not vals:
+        m1 = re.search(r"-(\d+(?:\.\d+)?)m\b", text)
+        if m1:
+            try:
+                vals.append(float(m1.group(1)) * 100 / 2.54)
+            except Exception:
+                pass
+    if not vals:
+        m2 = re.search(r"-(\d+(?:\.\d+)?)cm\b", text)
+        if m2:
+            try:
+                vals.append(float(m2.group(1)) / 2.54)
             except Exception:
                 pass
     return max(vals) if vals else None
@@ -561,6 +628,13 @@ def list_internal_orders(limit: int = 50, offset: int = 0, db: Session = Depends
                         persist_ext["箱唛"] = code_seg
         if persist_ext:
             crud.upsert_order_ext_bulk(db, o.id, persist_ext)
+        if grouped_lines:
+            for ln in grouped_lines:
+                pname = ln.get("product_name") or ""
+                cm_s, in_s = _extract_cm_in_from_text(pname)
+                ln["厘米"] = cm_s or str(ext_fields.get("厘米") or ext_fields.get("长cm") or "")
+                ln["英寸"] = in_s or str(ext_fields.get("英寸") or "")
+                ln["产品名"] = _normalized_product_full(pname, o.platform_order_no, ext_fields)
         items.append({
             "id": o.id,
             "internal_order_no": o.internal_order_no,
@@ -647,8 +721,13 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
         ship = _format_zh_date(ext.get("发货日") or ext.get("latest_ship_date") or ext.get("amz_ship"))
         for g in grouped.values():
             ext_formatted_name = str(ext.get("产品名") or "").strip()
-            has_formatted_code = bool(re.search(r"\n[A-Z0-9]{4,}-", ext_formatted_name, flags=re.I))
-            product_text = ext_formatted_name if has_formatted_code else (g.get("product_name") or ext.get("product_name") or ext_formatted_name or "")
+            multi_sku = len(grouped) > 1
+            base_name = (g.get("product_name") or "").strip()
+            if multi_sku:
+                product_text = _normalized_product_full(base_name or ext.get("product_name") or ext_formatted_name, o.platform_order_no, ext)
+            else:
+                has_formatted_code = bool(re.search(r"\n[A-Z0-9]{4,}-", ext_formatted_name, flags=re.I))
+                product_text = ext_formatted_name if has_formatted_code else _normalized_product_full(base_name or ext.get("product_name") or ext_formatted_name, o.platform_order_no, ext)
             pname_zh, pcode = _split_product_name_and_code(product_text)
             if not pcode:
                 pcode = (
@@ -663,6 +742,9 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
                     or _extract_product_code_segment(product_text)
                 )
             cm = str(ext.get("厘米") or ext.get("长cm") or "").strip()
+            cm_from_name, in_from_name = _extract_cm_in_from_text(product_text)
+            if cm_from_name:
+                cm = cm_from_name
             if not cm and pcode:
                 m = re.search(r"-(\d+(?:\.\d+)?)m\b", str(pcode), flags=re.I)
                 if m:
@@ -671,10 +753,8 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
                     except Exception:
                         cm = ""
             if not cm:
-                inches = _extract_inches_from_name(pname_zh or product_text)
-                if inches:
-                    cm = str(int(round(inches * 2.54)))
-            inches_text = str(ext.get("英寸") or "").strip() or _derive_inches_text(cm, product_text)
+                cm = str(ext.get("厘米") or ext.get("长cm") or "").strip()
+            inches_text = in_from_name or str(ext.get("英寸") or "").strip() or _derive_inches_text(cm, product_text)
             product_full = (f"{(pname_zh or product_text).strip()}\n{str(pcode or '').strip()}").strip()
             qty = g.get("qty") or ext.get("采购数量") or ext.get("purchase_qty") or ""
             img = g.get("image") or ext.get("产品图") or ext.get("product_image") or ""
