@@ -128,6 +128,26 @@ def _split_product_name_and_code(v: str):
     return s, ""
 
 
+def _extract_zip_from_address(addr: str):
+    s = str(addr or "")
+    m = re.search(r"\b(\d{5})(?:-\d{4})?\b", s)
+    return m.group(1) if m else ""
+
+
+def _derive_inches_text(cm_val, product_text: str):
+    if cm_val not in (None, ""):
+        try:
+            cmf = float(str(cm_val).replace("cm", "").strip())
+            if cmf > 0:
+                return f"{int(round(cmf / 2.54))}in"
+        except Exception:
+            pass
+    inc = _extract_inches_from_name(product_text or "")
+    if inc:
+        return f"{int(round(float(inc)))}in"
+    return ""
+
+
 def _build_kapi_url(base_url: str, api_path: str) -> str:
     base = str(base_url or "").strip() or "https://tran.wedoexpress.com"
     # allow user to paste full endpoint URL in config
@@ -519,7 +539,12 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="missing order_ids")
     flat_orders = []
     project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
-    template_path = os.path.join(project_root, "docs", "inputs", "internal_orders.xlsx")
+    template_candidates = [
+        "/Users/baicai/Downloads/internal_orders.xlsx",
+        os.path.join(project_root, "docs", "inputs", "internal_orders.xlsx"),
+        os.path.join(project_root, "app", "docs", "inputs", "internal_orders.xlsx"),
+    ]
+    template_path = next((p for p in template_candidates if os.path.exists(p)), template_candidates[1])
     for oid in ids:
         try:
             order_id = int(oid)
@@ -534,33 +559,58 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
         img = (items[0].product_image if items else None) or ext.get("产品图") or ext.get("product_image") or ""
         product_text = ext.get("产品名") or ext.get("product_name") or (items[0].product_name if items else "") or ""
         pname_zh, pcode = _split_product_name_and_code(product_text)
+        if not pcode:
+            pcode = (
+                _extract_product_code_segment(ext.get("产品名英文段"))
+                or _extract_product_code_segment(ext.get("箱唛"))
+                or _extract_product_code_segment(ext.get("Customer orderNo"))
+                or _extract_product_code_segment(ext.get("产品编码"))
+                or _extract_product_code_segment(ext.get("marks"))
+                or _extract_product_code_segment(ext.get("工厂内部型号"))
+                or _extract_product_code_segment(product_text)
+            )
         cm = str(ext.get("厘米") or ext.get("长cm") or "").strip()
+        if not cm and pcode:
+            m = re.search(r"-(\d+(?:\.\d+)?)m\b", str(pcode), flags=re.I)
+            if m:
+                try:
+                    cm = str(int(round(float(m.group(1)) * 100)))
+                except Exception:
+                    cm = ""
         if not cm:
             inches = _extract_inches_from_name(pname_zh or product_text)
             if inches:
                 cm = str(int(round(inches * 2.54)))
+        inches_text = str(ext.get("英寸") or "").strip() or _derive_inches_text(cm, product_text)
+        customer_addr = str(ext.get("客户地址") or "").strip()
+        region = str(ext.get("区域") or "").strip()
+        if not region:
+            zip5 = str(ext.get("postal_code") or "").strip() or _extract_zip_from_address(customer_addr)
+            region = _zip_to_region(zip5)
         qty = ext.get("采购数量") or ext.get("purchase_qty") or (items[0].quantity if items else "") or ""
         delivery = _format_zh_date_range(ext.get("送达日") or ext.get("amz_deliver") or "")
         ship = _format_zh_date(ext.get("发货日") or ext.get("latest_ship_date") or ext.get("amz_ship"))
+        product_full = (f"{(pname_zh or product_text).strip()}\n{str(pcode or '').strip()}").strip()
         order_row = {
             "序列": "",
             "出单日期": _to_ymd(ext.get("出单日期") or o.purchase_time),
             "产品图": img,
             "厘米": cm,
-            "英寸": ext.get("英寸") or "",
-            "区域": ext.get("区域") or "",
+            "英寸": inches_text,
+            "区域": region,
             "工厂内部型号": ext.get("工厂内部型号") or ext.get("internal_factory_no") or "",
             "店铺": _map_shop_name(ext.get("店铺") or o.shop_name),
             "订单编号": ext.get("订单编号") or o.platform_order_no or "",
             "内部订单号": ext.get("内部订单号") or o.internal_order_no or "",
             "产品名_zh": pname_zh or product_text,
             "产品名_code": pcode or "",
+            "产品名_full": product_full,
             "采购数量": qty,
             "单价": ext.get("单价") or ext.get("quoted_unit_price") or "",
             "售价": ext.get("售价") or ext.get("unit_price") or (items[0].unit_price if items else "") or "",
             "SKU": ext.get("SKU") or ext.get("sku") or (items[0].sku if items else "") or "",
             "单号": ext.get("单号") or o.tracking_no or "",
-            "客户地址": ext.get("客户地址") or "",
+            "客户地址": customer_addr,
             "发货日": ship,
             "送达日": delivery,
             "订单状态": _normalize_order_status(ext.get("订单状态") or o.order_status or ""),
@@ -579,9 +629,7 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
                 if h == "序列":
                     row.append(str(i))
                 elif h == "产品名":
-                    zh = row_map.get("产品名_zh") or ""
-                    code = row_map.get("产品名_code") or ""
-                    row.append(f"{zh}\n{code}".strip())
+                    row.append(row_map.get("产品名_full", ""))
                 else:
                     row.append(str(row_map.get(h, "") or ""))
             rows.append(row)
@@ -599,6 +647,8 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
         # use row 2-4 as style template block
         template_start = 2
         block_size = 3
+        wb_tpl = load_workbook(template_path)
+        ws_tpl = wb_tpl.active
         # clear old merges (except header)
         old_merges = list(ws.merged_cells.ranges)
         for mr in old_merges:
@@ -627,9 +677,6 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
             start_row = 2 + (idx - 1) * block_size
             # insert 3 rows
             ws.insert_rows(start_row, amount=block_size)
-            # copy style from original first block kept in memory by loading template again
-            wb_tpl = load_workbook(template_path)
-            ws_tpl = wb_tpl.active
             for r_off in range(block_size):
                 src_r = template_start + r_off
                 dst_r = start_row + r_off
@@ -654,7 +701,6 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
                         start_column=min_col,
                         end_column=max_col,
                     )
-            wb_tpl.close()
             # common values (merged)
             def setv(name, value, row=start_row):
                 c = header_map.get(name)
@@ -684,13 +730,9 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
             marks_col = header_map.get("箱唛")
             note_col = header_map.get("备注")
             image_col = header_map.get("产品图")
-            zh_name = data.get("产品名_zh", "")
             code = data.get("产品名_code", "")
-            cm = data.get("厘米", "")
             if name_col:
-                _set_value_safe(start_row, name_col, f"{cm}米柜体" if cm else "柜体")
-                _set_value_safe(start_row + 1, name_col, "LED智能镜柜")
-                _set_value_safe(start_row + 2, name_col, "水槽")
+                _set_value_safe(start_row, name_col, data.get("产品名_full", ""))
             if marks_col:
                 _set_value_safe(start_row, marks_col, code)
                 _set_value_safe(start_row + 1, marks_col, code)
@@ -699,8 +741,9 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
                 _set_value_safe(start_row + 1, note_col, data.get("备注") or "水龙头单独打包")
             if image_col:
                 _set_value_safe(start_row, image_col, data.get("产品图", ""))
-                _set_value_safe(start_row + 1, image_col, data.get("产品图", ""))
-                _set_value_safe(start_row + 2, image_col, data.get("产品图", ""))
+                if header_map.get("箱唛"):
+                    _set_value_safe(start_row + 1, image_col, data.get("产品图", ""))
+                    _set_value_safe(start_row + 2, image_col, data.get("产品图", ""))
 
         # remove trailing empty rows if any
         while ws.max_row > (1 + len(flat_orders) * block_size):
@@ -708,6 +751,7 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
         out_path = os.path.join("/tmp", f"internal_orders_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.xlsx")
         wb.save(out_path)
         wb.close()
+        wb_tpl.close()
 
     with open(out_path, "rb") as f:
         content = f.read()
