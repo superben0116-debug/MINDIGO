@@ -154,6 +154,8 @@ def _derive_inches_text(cm_val, product_text: str):
 
 def _download_image_to_file(url: str, cache_dir: str):
     u = str(url or "").strip()
+    # Amazon thumbnail -> large image
+    u = re.sub(r"_SL\d+_", "_SL800_", u, flags=re.I)
     if not u or not u.startswith(("http://", "https://")):
         return ""
     os.makedirs(cache_dir, exist_ok=True)
