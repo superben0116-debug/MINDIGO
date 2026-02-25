@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
+  <title>供应商管理</title>
+  <style>
+    :root { --bg:#f4f6fb; --ink:#0f172a; --muted:#64748b; --line:#e2e8f0; --card:#fff; --accent:#2563eb; }
+    body { margin:0; font-family:"SF Pro Text",-apple-system,BlinkMacSystemFont,"Noto Sans SC",sans-serif; background:var(--bg); color:var(--ink); }
+    .layout { display:grid; grid-template-columns:72px 1fr; min-height:100vh; }
+    .sidebar { background:#111827; color:#cbd5e1; padding:12px 6px; display:flex; flex-direction:column; gap:10px; }
+    .side-item { text-align:center; font-size:11px; padding:8px 6px; border-radius:10px; cursor:pointer; }
+    .side-item.active { background:#1f2937; color:#fff; }
+    .main { display:flex; flex-direction:column; min-width:0; }
+    .topbar { background:#0b1220; color:#e5e7eb; padding:8px 16px; display:flex; gap:12px; align-items:center; }
+    .tabs { background:#fff; border-bottom:1px solid var(--line); padding:8px 16px; display:flex; gap:8px; flex-wrap:wrap; }
+    .tab { background:#f1f5f9; color:#111827; padding:6px 10px; border-radius:999px; font-size:12px; cursor:pointer; }
+    .tab.active { background:#111827; color:#fff; }
+    .content { padding:16px; }
+    .card { background:#fff; border:1px solid var(--line); border-radius:16px; padding:16px; box-shadow:0 8px 20px rgba(15,23,42,0.06); }
+    .row { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
+    input { padding:8px 10px; border:1px solid var(--line); border-radius:10px; }
+    .btn { background:var(--accent); color:#fff; border:none; padding:8px 12px; border-radius:10px; cursor:pointer; font-size:12px; }
+    table { width:100%; border-collapse:collapse; }
+    th, td { padding:10px; border-bottom:1px solid var(--line); font-size:12px; }
+    th { color:var(--muted); text-align:left; }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <div class="sidebar">
+      <div class="side-item" data-go="/ui/dashboard.html">首页</div>
+      <div class="side-item" data-go="/ui/internal_orders.html">订单</div>
+      <div class="side-item" data-go="/ui/supplier_quote.html">报价</div>
+      <div class="side-item" data-go="/ui/kapi_export.html">卡派</div>
+      <div class="side-item" data-go="/ui/after_sales.html">售后</div>
+      <div class="side-item" data-go="/ui/customer_service.html">客服</div>
+      <div class="side-item active" data-go="/ui/suppliers.html">供应商</div>
+    </div>
+    <div class="main">
+      <div class="topbar">终极 ERP · 供应商管理 <span style="margin-left:8px;color:#94a3b8;font-size:12px;">v20260213-3</span></div>
+      <div class="tabs" id="tabs"></div>
+      <div class="content">
+        <div class="card">
+          <div class="row">
+            <input id="name" placeholder="供应商名称" />
+            <input id="username" placeholder="登录账号" />
+            <input id="password" placeholder="登录密码" type="password" />
+            <input id="contact" placeholder="联系人" />
+            <input id="phone" placeholder="电话" />
+            <input id="prefix" placeholder="编码前缀（如 C/F）" style="width:180px;" />
+            <input id="start" placeholder="起始编号（如 300）" style="width:180px;" />
+            <button class="btn" id="addBtn">新增供应商</button>
+            <button class="btn" id="logoutBtn" style="background:#64748b;">退出登录</button>
+          </div>
+          <div style="color:#475569;font-size:12px;margin-bottom:10px;">编码规则示例：前缀=C，起始=300，则工厂内部单号按 C300、C301... 自动顺延。</div>
+          <table>
+            <thead><tr><th>名称</th><th>账号</th><th>联系人</th><th>电话</th><th>报价规则</th><th>状态</th><th>操作</th></tr></thead>
+            <tbody id="rows"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script>
+    const tabsEl = document.getElementById("tabs");
+    function openTab(label, url) {
+      const tabs = JSON.parse(localStorage.getItem("tabs") || "[]");
+      if (!tabs.find(t => t.url === url)) tabs.push({ label, url });
+      localStorage.setItem("tabs", JSON.stringify(tabs));
+      renderTabs(url);
+    }
+    function renderTabs(activeUrl) {
+      const tabs = JSON.parse(localStorage.getItem("tabs") || "[]");
+      if (!tabs.length) {
+        tabs.push({ label: "供应商", url: "/ui/suppliers.html" });
+        localStorage.setItem("tabs", JSON.stringify(tabs));
+      }
+      tabsEl.innerHTML = "";
+      tabs.forEach(t => {
+        const el = document.createElement("div");
+        el.className = "tab" + (t.url === activeUrl ? " active" : "");
+        el.textContent = t.label;
+        el.onclick = () => location.href = t.url;
+        tabsEl.appendChild(el);
+      });
+    }
+    document.querySelectorAll(".side-item").forEach(el => {
+      el.addEventListener("click", () => {
+        const url = el.dataset.go;
+        if (!url) return;
+        openTab(el.textContent.trim(), url);
+        location.href = url;
+      });
+    });
+    renderTabs("/ui/suppliers.html");
+
+    const rows = document.getElementById("rows");
+    let data = [];
+    async function api(path, opts) {
+      const res = await fetch(path, Object.assign({ credentials: "include" }, opts || {}));
+      const out = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(out.detail || out.error || `${res.status}`);
+      return out;
+    }
+
+    function syncLocalStorageSuppliers() {
+      const lite = data
+        .filter(x => x.is_active !== false)
+        .map(x => ({
+          name: x.supplier_name || "",
+          contact: x.contact || "",
+          phone: x.phone || "",
+          prefix: (x.prefix || "F").toUpperCase(),
+          start: Number(x.start || 1),
+        }));
+      localStorage.setItem("suppliers", JSON.stringify(lite));
+    }
+
+    function render() {
+      rows.innerHTML = "";
+      data.forEach((s, idx) => {
+        const tr = document.createElement("tr");
+        const rule = `${s.prefix || "F"}${s.start || 1} 起`;
+        tr.innerHTML = `<td>${s.supplier_name || ""}</td><td>${s.username || ""}</td><td>${s.contact || ""}</td><td>${s.phone || ""}</td><td>${rule}</td><td>${s.is_active ? "启用" : "停用"}</td><td><button class="btn" data-edit="${idx}">编辑</button> <button class="btn" data-del="${idx}">删除</button></td>`;
+        rows.appendChild(tr);
+      });
+      syncLocalStorageSuppliers();
+    }
+
+    async function loadSuppliers() {
+      try {
+        const out = await api("/auth/suppliers");
+        data = Array.isArray(out.items) ? out.items : [];
+        render();
+      } catch (e) {
+        alert(`加载供应商失败：${e.message || e}`);
+      }
+    }
+
+    document.getElementById("addBtn").addEventListener("click", async () => {
+      const name = document.getElementById("name").value.trim();
+      const username = document.getElementById("username").value.trim();
+      const password = document.getElementById("password").value.trim();
+      const contact = document.getElementById("contact").value.trim();
+      const phone = document.getElementById("phone").value.trim();
+      const prefix = (document.getElementById("prefix").value.trim() || "F").toUpperCase();
+      const start = Number(document.getElementById("start").value.trim() || "1");
+      if (!name || !username || !password) { alert("请填写供应商名称、登录账号、登录密码"); return; }
+      try {
+        await api("/auth/suppliers", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            supplier_name: name,
+            username,
+            password,
+            contact,
+            phone,
+            prefix,
+            start: Number.isNaN(start) ? 1 : start,
+          }),
+        });
+      } catch (e) {
+        alert(`新增失败：${e.message || e}`);
+        return;
+      }
+      document.getElementById("name").value = "";
+      document.getElementById("username").value = "";
+      document.getElementById("password").value = "";
+      document.getElementById("contact").value = "";
+      document.getElementById("phone").value = "";
+      document.getElementById("prefix").value = "";
+      document.getElementById("start").value = "";
+      await loadSuppliers();
+    });
+
+    rows.addEventListener("click", async (e) => {
+      const btn = e.target;
+      if (btn && btn.dataset && btn.dataset.edit !== undefined) {
+        const idx = parseInt(btn.dataset.edit, 10);
+        const s = data[idx];
+        if (!s) return;
+        const name = prompt("供应商名称", s.supplier_name || "") || s.supplier_name;
+        const username = prompt("登录账号", s.username || "") || s.username;
+        const pwd = prompt("新密码（留空不改）", "") || "";
+        const contact = prompt("联系人", s.contact || "") || "";
+        const phone = prompt("电话", s.phone || "") || "";
+        const prefix = (prompt("工厂单号前缀", s.prefix || "F") || s.prefix || "F").toUpperCase();
+        const start = Number(prompt("起始数字", String(s.start || 1)) || s.start || 1);
+        const active = confirm("是否启用该供应商账号？\n确定=启用，取消=停用");
+        try {
+          await api(`/auth/suppliers/${s.id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              supplier_name: name.trim(),
+              username: username.trim(),
+              password: pwd.trim() || undefined,
+              contact: contact.trim(),
+              phone: phone.trim(),
+              prefix,
+              start: Number.isNaN(start) ? 1 : start,
+              is_active: active,
+            }),
+          });
+        } catch (e) {
+          alert(`编辑失败：${e.message || e}`);
+          return;
+        }
+        await loadSuppliers();
+        return;
+      }
+      if (btn && btn.dataset && btn.dataset.del !== undefined) {
+        const idx = parseInt(btn.dataset.del, 10);
+        if (!Number.isNaN(idx)) {
+          const s = data[idx];
+          if (!s) return;
+          if (!confirm(`确认删除供应商：${s.supplier_name || s.username}？`)) return;
+          try {
+            await api(`/auth/suppliers/${s.id}`, { method: "DELETE" });
+          } catch (e) {
+            alert(`删除失败：${e.message || e}`);
+            return;
+          }
+          await loadSuppliers();
+        }
+      }
+    });
+    document.getElementById("logoutBtn").addEventListener("click", async () => {
+      try { await api("/auth/logout", { method: "POST" }); } catch (_) {}
+      location.href = "/ui/admin_login.html";
+    });
+    loadSuppliers();
+  </script>
+</body>
+</html>

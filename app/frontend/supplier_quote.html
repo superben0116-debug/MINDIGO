@@ -1,0 +1,813 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>供应商报价单</title>
+  <style>
+    :root { --bg:#f5f0a6; --ink:#0f172a; --muted:#64748b; --line:#1f2937; --card:#fff; --accent:#2563eb; --dark:#0b1220; }
+    body { margin:0; font-family:"SF Pro Text",-apple-system,BlinkMacSystemFont,"Noto Sans SC",sans-serif; background:var(--bg); color:var(--ink); }
+    .layout { display:grid; grid-template-columns:72px 1fr; min-height:100vh; }
+    .sidebar { background:#111827; color:#cbd5e1; padding:12px 6px; display:flex; flex-direction:column; gap:10px; }
+    .side-item { text-align:center; font-size:11px; padding:8px 6px; border-radius:10px; cursor:pointer; }
+    .side-item.active { background:#1f2937; color:#fff; }
+    .main { display:flex; flex-direction:column; min-width:0; }
+    .topbar { background:#0b1220; color:#e5e7eb; padding:8px 16px; display:flex; gap:12px; align-items:center; }
+    .tabs { background:#fff; border-bottom:1px solid var(--line); padding:8px 16px; display:flex; gap:8px; flex-wrap:wrap; }
+    .tab { background:#f1f5f9; color:#111827; padding:6px 10px; border-radius:999px; font-size:12px; cursor:pointer; }
+    .tab.active { background:#111827; color:#fff; }
+    .content { padding:16px; }
+    .title { display:flex; justify-content:space-between; align-items:center; }
+    .title h1 { margin:0; font-size:20px; }
+    .badge { background:#111827; color:#fff; padding:6px 10px; border-radius:999px; font-size:12px; }
+    .table { margin-top:12px; background:#f5f0a6; border:2px solid var(--line); border-radius:8px; overflow:auto; }
+    table { width:100%; border-collapse:separate; border-spacing:0; }
+    th, td { padding:10px 12px; border-bottom:1px solid var(--line); border-right:1px solid var(--line); font-size:12px; text-align:left; vertical-align:top; background:#f5f0a6; }
+    th { color:#111827; font-weight:700; position:sticky; top:0; background:#f5f0a6; }
+    .img { width:80px; height:80px; border-radius:10px; background:#f1f5f9; object-fit:cover; display:block; }
+    input, textarea { width:100%; border:1px solid var(--line); border-radius:8px; padding:6px 8px; font-size:12px; }
+    .btn { background:var(--accent); color:#fff; border:none; padding:8px 12px; border-radius:10px; cursor:pointer; font-size:12px; }
+    .helper { color:#111827; font-size:12px; }
+    .blocker { background:#0b1220; color:#fff; padding:12px; border-radius:12px; margin-top:12px; }
+    .link-btn { background:#f1f5f9; border:1px solid var(--line); border-radius:999px; padding:6px 10px; cursor:pointer; font-size:12px; }
+    .th-click { cursor:pointer; user-select:none; }
+    .chip { display:inline-flex; align-items:center; gap:6px; background:#e2e8f0; border-radius:999px; padding:4px 8px; font-size:12px; }
+    .f-pop { position:fixed; z-index:30; min-width:280px; background:#fff; border:1px solid #cbd5e1; border-radius:12px; box-shadow:0 12px 28px rgba(2,6,23,.18); padding:10px; display:none; }
+    .f-pop .ttl { font-size:13px; font-weight:700; margin-bottom:8px; }
+    .f-pop .row { margin-bottom:8px; }
+    .f-pop .row label { display:block; font-size:12px; margin-bottom:4px; color:#475569; }
+    .f-pop .row input,.f-pop .row select { width:100%; box-sizing:border-box; }
+    .f-actions { display:flex; gap:8px; }
+    .f-actions .btn { padding:6px 10px; font-size:12px; }
+    .modebar { margin-top:10px; display:flex; gap:8px; }
+    .mode { border:1px solid var(--line); background:#fff; color:#111827; padding:6px 12px; border-radius:8px; cursor:pointer; }
+    .mode.active { background:#0b1220; color:#fff; }
+    .img-modal { position:fixed; inset:0; background:rgba(2,6,23,.72); display:none; align-items:center; justify-content:center; z-index:60; }
+    .img-modal img { max-width:90vw; max-height:90vh; border-radius:12px; background:#fff; }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <div class="sidebar">
+      <div class="side-item" data-go="/ui/dashboard.html">首页</div>
+      <div class="side-item" data-go="/ui/internal_orders.html">订单</div>
+      <div class="side-item active" data-go="/ui/supplier_quote.html">报价</div>
+      <div class="side-item" data-go="/ui/kapi_export.html">卡派</div>
+      <div class="side-item" data-go="/ui/after_sales.html">售后</div>
+      <div class="side-item" data-go="/ui/customer_service.html">客服</div>
+      <div class="side-item" data-go="/ui/suppliers.html">供应商</div>
+    </div>
+    <div class="main">
+      <div class="topbar">终极 ERP · 供应商报价单 <span style="margin-left:8px;color:#94a3b8;font-size:12px;">v20260209-2</span></div>
+      <div class="tabs" id="tabs"></div>
+      <div class="content">
+        <div class="title">
+          <h1>供应商报价单</h1>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <div class="badge" id="supplierName">供应商</div>
+            <button class="btn" id="switchSupplierBtn" style="padding:6px 10px;">切换供应商视角</button>
+            <button class="btn" id="exitSupplierBtn" style="padding:6px 10px;background:#64748b;">退出供应商视角</button>
+          </div>
+        </div>
+        <div class="helper" style="margin-top:8px;">报价可编辑并保存，保存后供应商与管理员看到同一版本。</div>
+        <div id="loginBlock" class="blocker" style="display:none;">请先在供应商登录页登录后再查看报价单。</div>
+        <div id="listFilters" style="display:none;margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <input id="kwFilter" placeholder="搜索：报价单号/产品名" style="width:220px;" />
+          <select id="statusFilter" style="width:140px;">
+            <option value="">全部状态</option>
+            <option value="pending">pending</option>
+            <option value="submitted">submitted</option>
+            <option value="confirmed">confirmed</option>
+          </select>
+          <button class="btn" id="applyFilterBtn">筛选</button>
+          <button class="btn" id="clearFilterBtn">清空</button>
+          <button class="btn" id="batchDeleteBtn" style="background:#dc2626;">批量删除</button>
+          <button class="btn" id="repairMarksBtn" style="background:#f59e0b;">修复箱唛</button>
+          <button class="btn" id="jumpOrdersBtn" style="background:#0ea5e9;">跳转内部订单</button>
+          <button class="btn" id="confirmQuotesBtn" style="background:#16a34a;">确认生成订单</button>
+        </div>
+        <div id="filterChips" style="display:none;margin-top:8px;gap:8px;flex-wrap:wrap;"></div>
+        <div class="modebar" id="modeBar" style="display:none;">
+          <button class="mode active" id="priceModeBtn">价格表</button>
+          <button class="mode" id="orderModeBtn">订单表</button>
+        </div>
+
+        <div id="quoteList" class="table" style="display:none;">
+          <table>
+            <thead>
+              <tr>
+                <th>序号</th>
+                <th><input type="checkbox" id="selectAllQuotes" /></th>
+                <th>工厂内部单号</th>
+                <th>下单日期</th>
+                <th>数量（套）</th>
+                <th>尺寸cm</th>
+                <th>产品图</th>
+                <th>产品名称</th>
+                <th>箱唛</th>
+                <th>单价（元）</th>
+                <th>发货日期</th>
+                <th>备注</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="quoteListBody"></tbody>
+          </table>
+        </div>
+
+        <div class="table" id="quoteTable" style="display:none;">
+          <table>
+            <thead>
+              <tr>
+                <th>序号</th>
+                <th></th>
+                <th>工厂内部单号</th>
+                <th>下单日期</th>
+                <th>数量（套）</th>
+                <th>尺寸cm</th>
+                <th>产品图</th>
+                <th>产品名称</th>
+                <th>箱唛</th>
+                <th>单价（元）</th>
+                <th>发货日期</th>
+                <th>备注</th>
+              </tr>
+            </thead>
+            <tbody id="quoteBody"></tbody>
+          </table>
+        </div>
+        <div style="margin-top:10px; display:flex; gap:8px;">
+          <button class="btn" id="saveDraftBtn" style="display:none;background:#0284c7;">保存调整</button>
+          <button class="btn" id="submitBtn">提交报价</button>
+          <button class="btn" onclick="location.href='/ui/supplier_login.html'">供应商登录</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="img-modal" id="imgModal"><img id="imgModalSrc" alt="preview" /></div>
+
+  <script>
+    const params = new URLSearchParams(location.search);
+    const quoteNo = params.get("quote_no");
+    const tabsEl = document.getElementById("tabs");
+    const isSupplierMode = !!localStorage.getItem("supplier_name");
+    let listMode = "price";
+    const colFilters = {};
+    let listRowsCache = [];
+    const fPop = document.createElement("div");
+    fPop.className = "f-pop";
+    fPop.innerHTML = `
+      <div class="ttl" id="fTitle"></div>
+      <div class="row">
+        <label>筛选类型</label>
+        <select id="fType">
+          <option value="text">文本包含</option>
+          <option value="number">数值区间</option>
+          <option value="date">日期范围</option>
+          <option value="status">状态多选</option>
+        </select>
+      </div>
+      <div class="row" id="fText"><label>关键词</label><input id="fTextVal" placeholder="输入关键词" /></div>
+      <div class="row" id="fNum" style="display:none;"><label>最小值</label><input id="fMin" type="number" /><label style="margin-top:6px;">最大值</label><input id="fMax" type="number" /></div>
+      <div class="row" id="fDate" style="display:none;"><label>开始</label><input id="fStart" type="date" /><label style="margin-top:6px;">结束</label><input id="fEnd" type="date" /></div>
+      <div class="row" id="fStatus" style="display:none;"><label>状态值（逗号分隔）</label><input id="fStatusVals" placeholder="pending,submitted" /></div>
+      <div class="f-actions">
+        <button class="btn" id="fApply">应用</button>
+        <button class="btn" id="fClear">清除</button>
+      </div>
+    `;
+    document.body.appendChild(fPop);
+    let activeFilterKey = "";
+    let activeFilterLabel = "";
+
+    function openTab(label, url) {
+      const tabs = JSON.parse(localStorage.getItem("tabs") || "[]");
+      if (!tabs.find(t => t.url === url)) tabs.push({ label, url });
+      localStorage.setItem("tabs", JSON.stringify(tabs));
+      renderTabs(url);
+    }
+    function renderTabs(activeUrl) {
+      const tabs = JSON.parse(localStorage.getItem("tabs") || "[]");
+      if (!tabs.length) {
+        tabs.push({ label: "报价", url: "/ui/supplier_quote.html" });
+        localStorage.setItem("tabs", JSON.stringify(tabs));
+      }
+      tabsEl.innerHTML = "";
+      tabs.forEach(t => {
+        const el = document.createElement("div");
+        el.className = "tab" + (t.url === activeUrl ? " active" : "");
+        el.textContent = t.label;
+        el.onclick = () => location.href = t.url;
+        tabsEl.appendChild(el);
+      });
+    }
+    document.querySelectorAll(".side-item").forEach(el => {
+      el.addEventListener("click", () => {
+        const url = el.dataset.go;
+        if (!url) return;
+        openTab(el.textContent.trim(), url);
+        location.href = url;
+      });
+    });
+    renderTabs("/ui/supplier_quote.html");
+
+    function esc(s) {
+      return String(s == null ? "" : s)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;");
+    }
+
+    function zoomImageUrl(url) {
+      if (!url) return "";
+      return String(url).replace(/_SL\d+_\.jpg/i, "_SL1000_.jpg");
+    }
+
+    function renderFilterChips() {
+      const box = document.getElementById("filterChips");
+      const entries = Object.entries(colFilters);
+      box.innerHTML = "";
+      box.style.display = entries.length ? "flex" : "none";
+      entries.forEach(([k, f]) => {
+        const c = document.createElement("span");
+        c.className = "chip";
+        let t = `${f.label}: `;
+        if (f.type === "text") t += f.value || "";
+        if (f.type === "number") t += `${f.min || ""} ~ ${f.max || ""}`;
+        if (f.type === "date") t += `${f.start || ""} ~ ${f.end || ""}`;
+        if (f.type === "status") t += (f.values || []).join(",");
+        c.innerHTML = `${esc(t)} <span style="cursor:pointer;">×</span>`;
+        c.querySelector("span").addEventListener("click", () => {
+          delete colFilters[k];
+          renderFilteredList();
+        });
+        box.appendChild(c);
+      });
+    }
+
+    function openColFilter(e, key, label) {
+      activeFilterKey = key;
+      activeFilterLabel = label;
+      document.getElementById("fTitle").textContent = label;
+      const ex = colFilters[key] || { type: "text", label };
+      document.getElementById("fType").value = ex.type || "text";
+      document.getElementById("fTextVal").value = ex.value || "";
+      document.getElementById("fMin").value = ex.min || "";
+      document.getElementById("fMax").value = ex.max || "";
+      document.getElementById("fStart").value = ex.start || "";
+      document.getElementById("fEnd").value = ex.end || "";
+      document.getElementById("fStatusVals").value = (ex.values || []).join(",");
+      const r = e.currentTarget.getBoundingClientRect();
+      fPop.style.left = `${Math.max(8, r.left)}px`;
+      fPop.style.top = `${r.bottom + 6}px`;
+      fPop.style.display = "block";
+      renderFilterInputs();
+    }
+
+    function renderFilterInputs() {
+      const t = document.getElementById("fType").value;
+      document.getElementById("fText").style.display = t === "text" ? "block" : "none";
+      document.getElementById("fNum").style.display = t === "number" ? "block" : "none";
+      document.getElementById("fDate").style.display = t === "date" ? "block" : "none";
+      document.getElementById("fStatus").style.display = t === "status" ? "block" : "none";
+    }
+
+    function matchFilter(val, f) {
+      const v = String(val ?? "");
+      if (f.type === "text") return !f.value || v.toLowerCase().includes(String(f.value).toLowerCase());
+      if (f.type === "number") {
+        const n = Number(v);
+        if (f.min !== "" && !Number.isNaN(Number(f.min)) && n < Number(f.min)) return false;
+        if (f.max !== "" && !Number.isNaN(Number(f.max)) && n > Number(f.max)) return false;
+        return true;
+      }
+      if (f.type === "date") {
+        const d = v.slice(0, 10);
+        if (f.start && d < f.start) return false;
+        if (f.end && d > f.end) return false;
+        return true;
+      }
+      if (f.type === "status") {
+        if (!f.values || !f.values.length) return true;
+        return f.values.includes(v);
+      }
+      return true;
+    }
+
+    function applyColumnFilters(rows) {
+      const entries = Object.entries(colFilters);
+      if (!entries.length) return rows;
+      return rows.filter(r => {
+        for (const [k, f] of entries) {
+          const map = {
+            seq: r.seq || r.order_id || "",
+            factory_no: r.factory_no || r.quote_no || "",
+            order_date: r.order_date || "",
+            quantity: r.quantity || "",
+            dimension: r.dimension || r.dimension_unit || "",
+            product_name: r.product_name || "",
+            marks: r.marks || "",
+            unit_price: r.unit_price || "",
+            supplier_name: r.supplier_name || "",
+            ship_date: r.ship_date || "",
+            remark: r.remark || "",
+            status: r.status || "",
+          };
+          if (!matchFilter(map[k], f)) return false;
+        }
+        return true;
+      });
+    }
+
+    function renderFilteredList() {
+      const supplier = localStorage.getItem("supplier_name") || "";
+      const kw = document.getElementById("kwFilter").value || "";
+      const st = document.getElementById("statusFilter").value || "";
+      let rows = listRowsCache.slice();
+      if (supplier) rows = rows.filter(x => String(x.supplier_name || "").trim().toLowerCase() === supplier.trim().toLowerCase());
+      if (kw) rows = rows.filter(x => `${x.quote_no || ""} ${x.product_name || ""}`.toLowerCase().includes(kw.toLowerCase()));
+      if (st) rows = rows.filter(x => String(x.status || "").toLowerCase() === st.toLowerCase());
+      if (listMode === "price") rows = rows.filter(x => true);
+      if (listMode === "order") rows = rows.filter(x => String(x.status || "").toLowerCase() === "confirmed");
+      rows = applyColumnFilters(rows);
+      const body = document.getElementById("quoteListBody");
+      body.innerHTML = "";
+      if (!rows.length) {
+        body.innerHTML = `<tr><td colspan="13" style="text-align:center;color:#475569;">暂无报价单</td></tr>`;
+        renderFilterChips();
+        return;
+      }
+      const finalRows = (!isSupplierMode && listMode === "price")
+        ? (() => {
+            const m = new Map();
+            rows.forEach(r => {
+              const key = String(r.order_id || r.quote_no || "");
+              if (!m.has(key)) {
+                m.set(key, { ...r, _children: [r] });
+              } else {
+                m.get(key)._children.push(r);
+              }
+            });
+            return Array.from(m.values());
+          })()
+        : rows.map(r => ({ ...r, _children: [r] }));
+
+      finalRows.forEach(q => {
+        const tr = document.createElement("tr");
+        const first = q._children[0] || q;
+        const dim = first.dimension || first.dimension_unit || "";
+        const supplierTag = q.assigned_supplier || q.supplier_name || "";
+        const priceText = q._children.map(x => `${x.supplier_name || "-"}: ${x.unit_price || ""}`).join("\n");
+        const remarkText = (!isSupplierMode && listMode === "order")
+          ? `${supplierTag ? ("供应商: " + supplierTag) : ""}${first.remark ? (" | " + first.remark) : ""}`
+          : (first.remark || "");
+        const quoteVals = q._children.map(x => x.quote_no).filter(Boolean).join("|");
+        const editablePriceHtml = (!isSupplierMode && listMode === "price")
+          ? `<textarea class="list-price-editor" data-order-id="${esc(first.order_id || "")}" rows="${Math.max(2, q._children.length)}" style="min-width:180px;">${esc(priceText)}</textarea>`
+          : `<span style="white-space:pre-line;">${esc(priceText)}</span>`;
+        tr.innerHTML = `
+          <td>${esc(first.seq || first.order_id || "")}</td>
+          <td><input type="checkbox" class="quote-check" data-order-id="${esc(first.order_id || "")}" value="${esc(quoteVals)}" /></td>
+          <td>${esc(first.factory_no || first.quote_no || "")}</td>
+          <td>${esc(first.order_date || "")}</td>
+          <td>${esc(first.quantity || "")}</td>
+          <td>${esc(dim)}</td>
+          <td>${first.image_url ? `<img class='img q-img' data-src='${esc(first.image_url)}' src='${esc(first.image_url)}' />` : "-"}</td>
+          <td>${esc(first.product_name || "")}</td>
+          <td>${esc(first.marks || "")}</td>
+          <td>${editablePriceHtml}</td>
+          <td>${esc(first.ship_date || "")}</td>
+          <td>${esc(remarkText)}</td>
+          <td>
+            <button class="link-btn" onclick="location.href='/ui/supplier_quote.html?quote_no=${esc(first.quote_no)}'">打开</button>
+            <button class="link-btn" style="margin-left:6px;" onclick="location.href='/ui/internal_orders.html?ids=${esc(first.order_id || '')}'">订单</button>
+            ${(!isSupplierMode && listMode === "price") ? `<button class="link-btn save-price-btn" data-order-id="${esc(first.order_id || "")}" style="margin-left:6px;background:#dbeafe;border-color:#3b82f6;">保存单价</button>` : ""}
+            <button class="link-btn" style="margin-left:6px;background:#fee2e2;border-color:#ef4444;" onclick="deleteQuote('${esc(first.quote_no)}')">删除</button>
+          </td>
+        `;
+        body.appendChild(tr);
+      });
+      renderFilterChips();
+      bindImageZoom();
+      bindListPriceSave();
+    }
+
+    async function saveGroupedPrices(orderId) {
+      const oid = String(orderId || "");
+      const editor = document.querySelector(`.list-price-editor[data-order-id='${CSS.escape(oid)}']`);
+      if (!editor) { alert("未找到可编辑单价区域"); return; }
+      const text = (editor.value || "").trim();
+      if (!text) { alert("请输入单价内容，格式：供应商:价格"); return; }
+      const lines = text.split(/\n+/).map(x => x.trim()).filter(Boolean);
+      const map = {};
+      lines.forEach(line => {
+        const i = line.indexOf(":");
+        if (i <= 0) return;
+        const n = line.slice(0, i).trim();
+        const p = line.slice(i + 1).trim();
+        if (!n) return;
+        map[n] = p;
+      });
+      const matched = listRowsCache.filter(x => String(x.order_id || "") === oid);
+      if (!matched.length) { alert("未找到该订单的报价行"); return; }
+      const updates = matched
+        .filter(x => x.quote_no && Object.prototype.hasOwnProperty.call(map, x.supplier_name || ""))
+        .map(x => ({ quote_no: x.quote_no, quoted_unit_price: map[x.supplier_name || ""] }));
+      if (!updates.length) {
+        alert("未解析到可保存数据。请按“供应商:价格”逐行填写。");
+        return;
+      }
+      const res = await fetch("/supplier-quotes/actions/batch-update", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ updates }),
+      });
+      const out = await res.json();
+      if (!res.ok || out.detail) {
+        alert("保存失败: " + JSON.stringify(out));
+        return;
+      }
+      alert(`已保存 ${out.updated || 0} 条报价，供应商界面将同步显示`);
+      loadQuoteList(localStorage.getItem("supplier_name") || "");
+    }
+
+    function bindListPriceSave() {
+      document.querySelectorAll(".save-price-btn").forEach(btn => {
+        btn.onclick = () => saveGroupedPrices(btn.dataset.orderId || "");
+      });
+    }
+
+    async function loadQuoteList(supplier) {
+      const kw = document.getElementById("kwFilter").value || "";
+      const st = document.getElementById("statusFilter").value || "";
+      const q = new URLSearchParams();
+      if (supplier) q.set("supplier_name", supplier);
+      if (kw) q.set("keyword", kw);
+      if (st) q.set("status", st);
+      const res = await fetch(`/supplier-quotes?${q.toString()}`);
+      const data = await res.json();
+      listRowsCache = data.items || [];
+      let rows = data.items || [];
+      if (!rows.length && supplier) {
+        const allRes = await fetch(`/supplier-quotes`);
+        const allData = await allRes.json();
+        const allRows = allData.items || [];
+        alert(`调试：当前供应商【${supplier}】匹配 0 条；系统总报价单 ${allRows.length} 条。请检查“供应商登录名”是否与推送时一致。`);
+        rows = allRows;
+      }
+      listRowsCache = rows;
+      renderFilteredList();
+    }
+
+    async function deleteQuote(quoteNo) {
+      if (!quoteNo) return;
+      if (!confirm(`确认删除报价单 ${quoteNo} ?`)) return;
+      const res = await fetch(`/supplier-quotes/${encodeURIComponent(quoteNo)}`, { method: "DELETE" });
+      const out = await res.json();
+      if (!res.ok || out.detail) {
+        alert("删除失败: " + JSON.stringify(out));
+        return;
+      }
+      alert(`已删除: ${quoteNo}`);
+      loadQuoteList(localStorage.getItem("supplier_name") || "");
+    }
+
+    async function loadQuote() {
+      const supplier = localStorage.getItem("supplier_name");
+      document.getElementById("supplierName").textContent = supplier || "供应商";
+
+      if (!supplier) {
+        document.getElementById("loginBlock").style.display = "block";
+      } else {
+        document.getElementById("loginBlock").style.display = "none";
+      }
+
+      if (!quoteNo) {
+        document.getElementById("listFilters").style.display = "flex";
+        document.getElementById("modeBar").style.display = "flex";
+        document.getElementById("quoteList").style.display = "block";
+        document.getElementById("quoteTable").style.display = "none";
+        document.getElementById("saveDraftBtn").style.display = "none";
+        document.getElementById("submitBtn").style.display = "none";
+        await loadQuoteList(supplier || "");
+        return;
+      }
+
+      const res = await fetch(`/supplier-quotes/${quoteNo}`);
+      const data = await res.json();
+      const item = (data.items || [])[0] || {};
+
+      document.getElementById("listFilters").style.display = "none";
+      document.getElementById("modeBar").style.display = "none";
+      document.getElementById("quoteList").style.display = "none";
+      document.getElementById("quoteTable").style.display = "block";
+      document.getElementById("saveDraftBtn").style.display = "inline-block";
+      document.getElementById("submitBtn").style.display = "inline-block";
+
+      const body = document.getElementById("quoteBody");
+      body.innerHTML = "";
+      const items = (data.items && data.items.length) ? data.items : [item];
+      const rowSpan = items.length;
+      function countSameMarksFrom(start) {
+        const m = String(items[start]?.marks || "");
+        let c = 1;
+        for (let i = start + 1; i < items.length; i += 1) {
+          if (String(items[i]?.marks || "") === m) c += 1;
+          else break;
+        }
+        return c;
+      }
+      items.forEach((it, idx) => {
+        const tr = document.createElement("tr");
+        const nameText = it.product_name || "未获取产品名";
+        const dimText = (String(it.dimension || "").replace(/cm$/i, "").trim()) || "137";
+        const rawImg = it.image_url || "";
+        const imgView = rawImg
+          ? `<img class='img q-img' data-idx='${idx}' data-src='${esc(rawImg)}' src='${esc(rawImg)}' />`
+          : "<div class='img' style='display:flex;align-items:center;justify-content:center;color:#6b7280;font-size:10px;'>无图片</div>";
+        const imgHtml = isSupplierMode
+          ? imgView
+          : `${imgView}<div style="margin-top:6px;"><input class="img-url-input" data-idx="${idx}" placeholder="粘贴图片URL" value="${esc(rawImg)}" /></div><div style="margin-top:6px;"><input class="img-file-input" data-idx="${idx}" type="file" accept="image/*" /></div>`;
+        const sameAsPrev = idx > 0 && String(items[idx - 1].marks || "") === String(it.marks || "");
+        let html = "";
+        if (idx === 0) {
+          html += `<td rowspan="${rowSpan}">${esc(data.seq || data.order_id || "")}</td>`;
+          html += `<td rowspan="${rowSpan}"></td>`;
+          html += `<td rowspan="${rowSpan}"><input id="factoryNoInput" ${isSupplierMode ? "readonly" : ""} placeholder="工厂内部单号" value="${esc(data.factory_no || data.quote_no || "")}" /></td>`;
+          html += `<td rowspan="${rowSpan}">${esc(data.order_date || "")}</td>`;
+          html += `<td rowspan="${rowSpan}"><input id="qtyInput" type="number" ${isSupplierMode ? "readonly" : ""} value="${esc(it.quantity || 1)}" /></td>`;
+          html += `<td rowspan="${rowSpan}"><input id="dimInput" ${isSupplierMode ? "readonly" : ""} value="${esc(dimText)}" /></td>`;
+        }
+        html += `<td>${imgHtml}</td>`;
+        html += `<td><input class="nameInput" value="${esc(nameText)}" /></td>`;
+        if (!sameAsPrev) {
+          html += `<td rowspan="${countSameMarksFrom(idx)}"><input class="marksInput" ${isSupplierMode ? "readonly" : ""} placeholder="箱唛" value="${esc(it.marks || "")}" /></td>`;
+        }
+        if (idx === 0) {
+          html += `<td rowspan="${rowSpan}"><input id="quotedUnitPrice" type="number" placeholder="单价" value="${esc(data.supplier_input?.quoted_unit_price || data.unit_price || "")}" /></td>`;
+          html += `<td rowspan="${rowSpan}"><input id="shipDate" type="date" ${isSupplierMode ? "readonly" : ""} value="${esc(data.ship_date || "")}" /></td>`;
+          const defaultRemark = items.map(x => x.remark || "").filter(Boolean).join("\n");
+          html += `<td rowspan="${rowSpan}"><textarea id="supplierRemark" rows="2" ${isSupplierMode ? "readonly" : ""} placeholder="备注">${esc(defaultRemark)}</textarea></td>`;
+        }
+        tr.innerHTML = html;
+        body.appendChild(tr);
+      });
+      bindImageZoom();
+      bindImageEditors();
+    }
+
+    function buildDraftPayload() {
+      const rows = Array.from(document.querySelectorAll("#quoteBody tr"));
+      const names = Array.from(document.querySelectorAll(".nameInput"));
+      const marksInputs = Array.from(document.querySelectorAll(".marksInput"));
+      const marksByRow = [];
+      let mIdx = 0;
+      rows.forEach((row, idx) => {
+        const ownMark = row.querySelector(".marksInput");
+        if (ownMark) {
+          marksByRow[idx] = ownMark.value || "";
+          mIdx += 1;
+        } else {
+          marksByRow[idx] = marksByRow[idx - 1] || "";
+        }
+      });
+      const imgInputs = Array.from(document.querySelectorAll(".img-url-input"));
+      const items = rows.map((_, idx) => ({
+        product_name: names[idx]?.value || "",
+        marks: marksByRow[idx] || "",
+        quantity: document.getElementById("qtyInput")?.value || 1,
+        dimension: document.getElementById("dimInput")?.value || "",
+        image_url: imgInputs[idx]?.value || "",
+      }));
+      return {
+        factory_no: document.getElementById("factoryNoInput")?.value || "",
+        quoted_unit_price: document.getElementById("quotedUnitPrice")?.value || null,
+        ship_date: document.getElementById("shipDate")?.value || "",
+        supplier_remark: document.getElementById("supplierRemark")?.value || "",
+        items,
+      };
+    }
+
+    document.getElementById("saveDraftBtn").addEventListener("click", async () => {
+      if (!quoteNo) return;
+      const payload = buildDraftPayload();
+      const res = await fetch(`/supplier-quotes/${quoteNo}/draft`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const out = await res.json();
+      if (!res.ok || out.detail) {
+        alert("保存失败: " + JSON.stringify(out));
+        return;
+      }
+      alert("已保存调整，供应商界面已同步");
+    });
+
+    document.getElementById("submitBtn").addEventListener("click", async () => {
+      if (!quoteNo) { alert("缺少 quote_no"); return; }
+      const d = buildDraftPayload();
+      const uniqueMarks = Array.from(new Set((d.items || []).map(x => x.marks).filter(Boolean)));
+      const payload = {
+        factory_no: d.factory_no,
+        marks: uniqueMarks.join(" | "),
+        quoted_unit_price: d.quoted_unit_price,
+        quoted_total_price: null,
+        lead_time_days: null,
+        ship_date: d.ship_date,
+        supplier_remark: d.supplier_remark,
+      };
+      const res = await fetch(`/supplier-quotes/${quoteNo}/submit`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const out = await res.json();
+      if (out && out.detail) {
+        alert("提交失败: " + JSON.stringify(out));
+        return;
+      }
+      alert(`已提交：${out.status}`);
+    });
+
+    document.getElementById("applyFilterBtn").addEventListener("click", () => loadQuoteList(localStorage.getItem("supplier_name") || ""));
+    document.getElementById("clearFilterBtn").addEventListener("click", () => {
+      document.getElementById("kwFilter").value = "";
+      document.getElementById("statusFilter").value = "";
+      Object.keys(colFilters).forEach(k => delete colFilters[k]);
+      loadQuoteList(localStorage.getItem("supplier_name") || "");
+    });
+    document.getElementById("batchDeleteBtn").addEventListener("click", async () => {
+      const selected = Array.from(document.querySelectorAll(".quote-check:checked"))
+        .flatMap(x => String(x.value || "").split("|").map(v => v.trim()).filter(Boolean));
+      if (!selected.length) { alert("请先勾选报价单"); return; }
+      if (!confirm(`确认删除 ${selected.length} 条报价单？`)) return;
+      for (const qn of selected) {
+        await fetch(`/supplier-quotes/${encodeURIComponent(qn)}`, { method: "DELETE" });
+      }
+      alert(`已删除 ${selected.length} 条`);
+      loadQuoteList(localStorage.getItem("supplier_name") || "");
+    });
+    document.getElementById("repairMarksBtn").addEventListener("click", async () => {
+      const selected = Array.from(document.querySelectorAll(".quote-check:checked"))
+        .flatMap(x => String(x.value || "").split("|").map(v => v.trim()).filter(Boolean));
+      if (!selected.length) { alert("请先勾选报价单"); return; }
+      const res = await fetch("/supplier-quotes/repair-marks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ quote_nos: selected }),
+      });
+      const out = await res.json();
+      if (!res.ok || out.detail) { alert("修复失败: " + JSON.stringify(out)); return; }
+      alert(`已处理 ${out.processed} 条，已修复 ${out.fixed} 条。\n调试: ${JSON.stringify((out.debug || []).slice(0, 8))}`);
+      loadQuoteList(localStorage.getItem("supplier_name") || "");
+    });
+    document.getElementById("confirmQuotesBtn").addEventListener("click", async () => {
+      const selectedEls = Array.from(document.querySelectorAll(".quote-check:checked"));
+      const selected = selectedEls.flatMap(x => String(x.value || "").split("|").map(v => v.trim()).filter(Boolean));
+      if (!selected.length) { alert("请先勾选报价单"); return; }
+      // 直接按勾选的报价生成订单。要分配给哪个供应商，就勾选哪个供应商的报价行。
+      const chosenSupplier = "";
+      const res = await fetch("/supplier-quotes/confirm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ quote_nos: selected, supplier_name: chosenSupplier }),
+      });
+      const out = await res.json();
+      if (!res.ok || out.detail) { alert("确认失败: " + JSON.stringify(out)); return; }
+      alert(`已确认 ${out.confirmed} 条${out.supplier_name ? `（供应商: ${out.supplier_name}）` : ""}，已进入订单表`);
+      listMode = "order";
+      document.getElementById("priceModeBtn").classList.remove("active");
+      document.getElementById("orderModeBtn").classList.add("active");
+      loadQuoteList(localStorage.getItem("supplier_name") || "");
+    });
+    document.getElementById("jumpOrdersBtn").addEventListener("click", () => {
+      const selected = Array.from(document.querySelectorAll(".quote-check:checked"));
+      if (!selected.length) { alert("请先勾选报价单"); return; }
+      const ids = Array.from(new Set(selected.map(x => x.dataset.orderId).filter(Boolean)));
+      if (!ids.length) { alert("未找到对应内部订单ID"); return; }
+      location.href = `/ui/internal_orders.html?ids=${encodeURIComponent(ids.join(","))}`;
+    });
+    document.getElementById("fType").addEventListener("change", renderFilterInputs);
+    document.getElementById("fApply").addEventListener("click", () => {
+      const t = document.getElementById("fType").value;
+      const f = { type: t, label: activeFilterLabel };
+      if (t === "text") f.value = document.getElementById("fTextVal").value || "";
+      if (t === "number") { f.min = document.getElementById("fMin").value || ""; f.max = document.getElementById("fMax").value || ""; }
+      if (t === "date") { f.start = document.getElementById("fStart").value || ""; f.end = document.getElementById("fEnd").value || ""; }
+      if (t === "status") f.values = (document.getElementById("fStatusVals").value || "").split(",").map(x => x.trim()).filter(Boolean);
+      colFilters[activeFilterKey] = f;
+      fPop.style.display = "none";
+      renderFilteredList();
+    });
+    document.getElementById("fClear").addEventListener("click", () => {
+      delete colFilters[activeFilterKey];
+      fPop.style.display = "none";
+      renderFilteredList();
+    });
+    document.addEventListener("click", (e) => {
+      if (!fPop.contains(e.target) && !e.target.classList.contains("th-click")) fPop.style.display = "none";
+    });
+
+    function bindHeaderFilters() {
+      const mapping = [
+        ["序号", "seq"], ["工厂内部单号", "factory_no"], ["下单日期", "order_date"], ["数量（套）", "quantity"],
+        ["尺寸cm", "dimension"], ["产品名称", "product_name"], ["箱唛", "marks"], ["单价（元）", "unit_price"],
+        ["发货日期", "ship_date"], ["备注", "remark"], ["状态", "status"],
+      ];
+      const ths = Array.from(document.querySelectorAll("#quoteList thead th"));
+      ths.forEach(th => {
+        const txt = (th.textContent || "").trim();
+        const hit = mapping.find(x => x[0] === txt);
+        if (!hit) return;
+        th.classList.add("th-click");
+        th.title = "点击筛选";
+        th.addEventListener("click", (e) => openColFilter(e, hit[1], hit[0]));
+      });
+    }
+
+    function bindImageZoom() {
+      document.querySelectorAll(".q-img").forEach(img => {
+        img.onclick = () => {
+          const raw = img.dataset.src || img.src || "";
+          const big = zoomImageUrl(raw);
+          const modal = document.getElementById("imgModal");
+          const m = document.getElementById("imgModalSrc");
+          m.src = big || raw;
+          modal.style.display = "flex";
+        };
+      });
+    }
+
+    function bindImageEditors() {
+      document.querySelectorAll(".img-url-input").forEach(input => {
+        input.addEventListener("input", () => {
+          const idx = input.dataset.idx || "";
+          const target = document.querySelector(`.q-img[data-idx='${CSS.escape(idx)}']`);
+          if (!target) return;
+          const v = input.value.trim();
+          target.src = v;
+          target.dataset.src = v;
+        });
+      });
+      document.querySelectorAll(".img-file-input").forEach(inp => {
+        inp.addEventListener("change", (e) => {
+          const file = e.target.files && e.target.files[0];
+          if (!file) return;
+          const idx = inp.dataset.idx || "";
+          const reader = new FileReader();
+          reader.onload = () => {
+            const v = String(reader.result || "");
+            const urlInput = document.querySelector(`.img-url-input[data-idx='${CSS.escape(idx)}']`);
+            const target = document.querySelector(`.q-img[data-idx='${CSS.escape(idx)}']`);
+            if (urlInput) urlInput.value = v;
+            if (target) {
+              target.src = v;
+              target.dataset.src = v;
+            }
+          };
+          reader.readAsDataURL(file);
+        });
+      });
+    }
+
+    document.getElementById("imgModal").addEventListener("click", () => {
+      document.getElementById("imgModal").style.display = "none";
+    });
+    document.getElementById("switchSupplierBtn").addEventListener("click", () => {
+      const list = JSON.parse(localStorage.getItem("suppliers") || "[]");
+      const names = list.map(x => x.name).filter(Boolean);
+      const tip = names.length ? `可选: ${names.join(", ")}` : "请输入供应商名称";
+      const val = prompt(`切换到供应商视角。\n${tip}`, names[0] || "");
+      if (!val) return;
+      localStorage.setItem("supplier_name", val.trim());
+      location.href = "/ui/supplier_quote.html";
+    });
+    document.getElementById("exitSupplierBtn").addEventListener("click", () => {
+      localStorage.removeItem("supplier_name");
+      location.href = "/ui/supplier_quote.html";
+    });
+    document.getElementById("priceModeBtn").addEventListener("click", () => {
+      listMode = "price";
+      document.getElementById("priceModeBtn").classList.add("active");
+      document.getElementById("orderModeBtn").classList.remove("active");
+      renderFilteredList();
+    });
+    document.getElementById("orderModeBtn").addEventListener("click", () => {
+      listMode = "order";
+      document.getElementById("priceModeBtn").classList.remove("active");
+      document.getElementById("orderModeBtn").classList.add("active");
+      renderFilteredList();
+    });
+
+    bindHeaderFilters();
+    document.addEventListener("change", (e) => {
+      const t = e.target;
+      if (t && t.id === "selectAllQuotes") {
+        document.querySelectorAll(".quote-check").forEach(cb => { cb.checked = t.checked; });
+      }
+    });
+    loadQuote();
+  </script>
+</body>
+</html>

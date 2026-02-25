@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>首页仪表盘</title>
+  <style>
+    :root { --bg:#f4f6fb; --ink:#0f172a; --muted:#64748b; --line:#e2e8f0; --card:#fff; --accent:#2563eb; }
+    body { margin:0; font-family:"SF Pro Text",-apple-system,BlinkMacSystemFont,"Noto Sans SC",sans-serif; background:var(--bg); color:var(--ink); }
+    .layout { display:grid; grid-template-columns:72px 1fr; min-height:100vh; }
+    .sidebar { background:#111827; color:#cbd5e1; padding:12px 6px; display:flex; flex-direction:column; gap:10px; }
+    .side-item { text-align:center; font-size:11px; padding:8px 6px; border-radius:10px; cursor:pointer; }
+    .side-item.active { background:#1f2937; color:#fff; }
+    .main { display:flex; flex-direction:column; }
+    .topbar { background:#0b1220; color:#e5e7eb; padding:8px 16px; display:flex; gap:12px; align-items:center; }
+    .tabs { background:#fff; border-bottom:1px solid var(--line); padding:8px 16px; display:flex; gap:8px; flex-wrap:wrap; }
+    .tab { background:#f1f5f9; color:#111827; padding:6px 10px; border-radius:999px; font-size:12px; cursor:pointer; }
+    .tab.active { background:#111827; color:#fff; }
+    .content { padding:16px; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:16px; padding:16px; box-shadow:0 8px 20px rgba(15,23,42,0.06); }
+    .grid { display:grid; gap:12px; }
+    .grid.cols-4 { grid-template-columns:repeat(4, minmax(0,1fr)); }
+    .grid.cols-3 { grid-template-columns:repeat(3, minmax(0,1fr)); }
+    .stat { display:flex; flex-direction:column; gap:6px; }
+    .stat .label { color:var(--muted); font-size:12px; }
+    .stat .value { font-size:22px; font-weight:700; }
+    .chip { background:#eff6ff; color:#1d4ed8; padding:4px 8px; border-radius:999px; font-size:11px; }
+    .chart { height:180px; background:linear-gradient(180deg,#f8fafc,#fff); border-radius:12px; border:1px dashed var(--line); }
+    .links { display:flex; gap:8px; flex-wrap:wrap; }
+    .link { background:#fff; border:1px solid var(--line); border-radius:12px; padding:8px 10px; font-size:12px; cursor:pointer; }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <div class="sidebar">
+      <div class="side-item active" data-go="/ui/dashboard.html">首页</div>
+      <div class="side-item" data-go="/ui/internal_orders.html">订单</div>
+      <div class="side-item" data-go="/ui/supplier_quote.html">报价</div>
+      <div class="side-item" data-go="/ui/kapi_export.html">卡派</div>
+      <div class="side-item" data-go="/ui/after_sales.html">售后</div>
+      <div class="side-item" data-go="/ui/customer_service.html">客服</div>
+      <div class="side-item" data-go="/ui/suppliers.html">供应商</div>
+    </div>
+    <div class="main">
+      <div class="topbar">终极 ERP · 运营看板</div>
+      <div class="tabs" id="tabs"></div>
+      <div class="content">
+        <div class="grid cols-4">
+          <div class="card stat"><div class="label">实时销量</div><div class="value" id="kpiSales">0</div><div class="chip">今日</div></div>
+          <div class="card stat"><div class="label">订单量</div><div class="value" id="kpiOrders">0</div><div class="chip">今日</div></div>
+          <div class="card stat"><div class="label">未报价</div><div class="value" id="kpiUnquote">0</div><div class="chip">待处理</div></div>
+          <div class="card stat"><div class="label">预计利润</div><div class="value" id="kpiProfit">0</div><div class="chip">估算</div></div>
+        </div>
+        <div style="height:12px"></div>
+        <div class="grid cols-3">
+          <div class="card stat"><div class="label">售后工单</div><div class="value" id="kpiAfterSales">0</div></div>
+          <div class="card stat"><div class="label">客服待处理</div><div class="value" id="kpiSupport">0</div></div>
+          <div class="card stat"><div class="label">卡派待导出</div><div class="value" id="kpiKapi">0</div></div>
+        </div>
+        <div style="height:12px"></div>
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+            <div>业绩趋势</div>
+            <div class="links">
+              <div class="link" data-go="/ui/internal_orders.html">查看订单</div>
+              <div class="link" data-go="/ui/supplier_quote.html">查看报价</div>
+            </div>
+          </div>
+          <div class="chart" id="chart"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const tabsEl = document.getElementById("tabs");
+    function openTab(label, url) {
+      const tabs = JSON.parse(localStorage.getItem("tabs") || "[]");
+      if (!tabs.find(t => t.url === url)) tabs.push({ label, url });
+      localStorage.setItem("tabs", JSON.stringify(tabs));
+      renderTabs(url);
+    }
+    function renderTabs(activeUrl) {
+      const tabs = JSON.parse(localStorage.getItem("tabs") || "[]");
+      if (!tabs.length) {
+        tabs.push({ label: "首页", url: "/ui/dashboard.html" });
+        localStorage.setItem("tabs", JSON.stringify(tabs));
+      }
+      tabsEl.innerHTML = "";
+      tabs.forEach(t => {
+        const el = document.createElement("div");
+        el.className = "tab" + (t.url === activeUrl ? " active" : "");
+        el.textContent = t.label;
+        el.onclick = () => location.href = t.url;
+        tabsEl.appendChild(el);
+      });
+    }
+    document.querySelectorAll(".side-item, .link").forEach(el => {
+      el.addEventListener("click", () => {
+        const url = el.dataset.go;
+        if (!url) return;
+        openTab(el.textContent.trim(), url);
+        location.href = url;
+      });
+    });
+    renderTabs("/ui/dashboard.html");
+
+    async function loadKpis() {
+      const res = await fetch("/internal-orders");
+      const data = await res.json();
+      const items = data.items || [];
+      const today = new Date().toISOString().slice(0,10);
+      const todayOrders = items.filter(o => (o.purchase_time || "").startsWith(today));
+      const sales = todayOrders.reduce((s,o)=> s + Number((o.ext||{}).total_price || 0),0);
+      const orders = todayOrders.length;
+      const unquote = items.filter(o => !(o.ext||{}).unit_price).length;
+      const profit = items.reduce((s,o)=> s + Number((o.ext||{}).profit || 0),0);
+      document.getElementById("kpiSales").textContent = sales.toFixed(2);
+      document.getElementById("kpiOrders").textContent = orders;
+      document.getElementById("kpiUnquote").textContent = unquote;
+      document.getElementById("kpiProfit").textContent = profit.toFixed(2);
+      document.getElementById("kpiAfterSales").textContent = items.filter(o => (o.ext||{}).refund).length;
+      document.getElementById("kpiSupport").textContent = items.filter(o => (o.ext||{}).customer_comment).length;
+      document.getElementById("kpiKapi").textContent = items.filter(o => !(o.ext||{}).kapi_no).length;
+    }
+    loadKpis();
+  </script>
+</body>
+</html>

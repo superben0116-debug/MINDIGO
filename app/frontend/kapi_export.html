@@ -1,0 +1,525 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
+  <title>卡派表格</title>
+  <style>
+    :root { --bg:#f4f6fb; --ink:#0f172a; --muted:#64748b; --line:#d1d5db; --card:#fff; --accent:#2563eb; --head:#1f5fbf; }
+    body { margin:0; font-family:"SF Pro Text",-apple-system,BlinkMacSystemFont,"Noto Sans SC",sans-serif; background:var(--bg); color:var(--ink); }
+    .layout { display:grid; grid-template-columns:72px 1fr; min-height:100vh; }
+    .sidebar { background:#111827; color:#cbd5e1; padding:12px 6px; display:flex; flex-direction:column; gap:10px; }
+    .side-item { text-align:center; font-size:11px; padding:8px 6px; border-radius:10px; cursor:pointer; }
+    .side-item.active { background:#1f2937; color:#fff; }
+    .main { display:flex; flex-direction:column; min-width:0; }
+    .topbar { background:#0b1220; color:#e5e7eb; padding:8px 16px; display:flex; gap:12px; align-items:center; }
+    .tabs { background:#fff; border-bottom:1px solid var(--line); padding:8px 16px; display:flex; gap:8px; flex-wrap:wrap; }
+    .tab { background:#f1f5f9; color:#111827; padding:6px 10px; border-radius:999px; font-size:12px; cursor:pointer; }
+    .tab.active { background:#111827; color:#fff; }
+    .content { padding:16px; }
+    .card { background:#fff; border:1px solid var(--line); border-radius:16px; padding:16px; box-shadow:0 8px 20px rgba(15,23,42,.06); }
+    .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:10px; }
+    .btn { background:var(--accent); color:#fff; border:none; padding:8px 12px; border-radius:10px; cursor:pointer; font-size:12px; }
+    .btn.alt { background:#0ea5e9; }
+    input { padding:8px 10px; border:1px solid var(--line); border-radius:10px; }
+    .sheet { border:1px solid var(--line); border-radius:12px; overflow:auto; max-height:68vh; }
+    table { border-collapse:separate; border-spacing:0; min-width:1800px; width:max-content; }
+    th, td { border-right:1px solid var(--line); border-bottom:1px solid var(--line); padding:8px 10px; font-size:12px; white-space:nowrap; background:#fff; }
+    th { position:sticky; top:0; z-index:2; background:var(--head); color:#fff; font-weight:700; cursor:pointer; }
+    td[contenteditable="true"] { background:#f8fafc; outline:none; }
+    .helper { color:#475569; font-size:12px; }
+    .chip { display:inline-flex; align-items:center; gap:6px; background:#e2e8f0; border-radius:999px; padding:4px 8px; font-size:12px; }
+    .f-pop { position:fixed; z-index:30; min-width:260px; background:#fff; border:1px solid #cbd5e1; border-radius:12px; box-shadow:0 12px 28px rgba(2,6,23,.18); padding:10px; display:none; }
+    .f-pop .ttl { font-size:13px; font-weight:700; margin-bottom:8px; }
+    .f-pop .row { margin-bottom:8px; }
+    .f-pop .row label { display:block; font-size:12px; margin-bottom:4px; color:#475569; }
+    .f-pop .row input { width:100%; box-sizing:border-box; }
+    pre { margin:0; background:#0f172a; color:#e2e8f0; padding:10px; border-radius:10px; max-height:220px; overflow:auto; }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <div class="sidebar">
+      <div class="side-item" data-go="/ui/dashboard.html">首页</div>
+      <div class="side-item" data-go="/ui/internal_orders.html">订单</div>
+      <div class="side-item" data-go="/ui/supplier_quote.html">报价</div>
+      <div class="side-item active" data-go="/ui/kapi_export.html">卡派</div>
+      <div class="side-item" data-go="/ui/after_sales.html">售后</div>
+      <div class="side-item" data-go="/ui/customer_service.html">客服</div>
+      <div class="side-item" data-go="/ui/suppliers.html">供应商</div>
+    </div>
+    <div class="main">
+      <div class="topbar">终极 ERP · 卡派表格 <span style="margin-left:8px;color:#94a3b8;font-size:12px;">v20260214-3</span></div>
+      <div class="tabs" id="tabs"></div>
+      <div class="content">
+        <div class="card">
+          <div class="row" style="justify-content:space-between;">
+            <h3 style="margin:0;">卡派表格（从内部订单勾选导入）</h3>
+            <div style="display:flex;gap:8px;">
+              <button class="btn" id="importBtn">导入订单</button>
+              <button class="btn alt" id="queryFeeBtn">查询费用</button>
+              <button class="btn alt" id="createOrderBtn" style="background:#16a34a;">创建单据</button>
+              <button class="btn" id="clearFilterBtn" style="background:#64748b;">清除筛选</button>
+              <button class="btn" id="exportBtn">导出 XLSX</button>
+            </div>
+          </div>
+          <div class="row">
+            <input id="orderIds" placeholder="订单ID/平台订单号/内部订单号，支持逗号分隔" style="min-width:380px;" />
+            <span class="helper" id="summary">未导入</span>
+          </div>
+          <div class="row" id="chips"></div>
+          <div class="sheet">
+            <table>
+              <thead><tr id="head"></tr></thead>
+              <tbody id="body"></tbody>
+            </table>
+          </div>
+          <div style="margin-top:10px;" class="helper">调试信息</div>
+          <pre id="debugBox">等待导入...</pre>
+          <div style="margin-top:10px;" class="helper">费用结果</div>
+          <pre id="feeBox">等待查询...</pre>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const tabsEl = document.getElementById("tabs");
+    const headEl = document.getElementById("head");
+    const bodyEl = document.getElementById("body");
+    const debugBox = document.getElementById("debugBox");
+    const feeBox = document.getElementById("feeBox");
+    const summaryEl = document.getElementById("summary");
+    const chipsEl = document.getElementById("chips");
+    const filters = {};
+    let header = [];
+    let rows = [];
+    let rowOrderIds = [];
+    let lastFreight = null;
+
+    const fPop = document.createElement("div");
+    fPop.className = "f-pop";
+    fPop.innerHTML = `
+      <div class="ttl" id="fTitle"></div>
+      <div class="row"><label>关键词（包含）</label><input id="fVal" /></div>
+      <div class="row" style="display:flex;gap:8px;">
+        <button class="btn" id="fApply">应用</button>
+        <button class="btn" id="fClear">清除</button>
+      </div>
+    `;
+    document.body.appendChild(fPop);
+    let activeCol = -1;
+    let activeLabel = "";
+
+    function openTab(label, url) {
+      const tabs = JSON.parse(localStorage.getItem("tabs") || "[]");
+      if (!tabs.find(t => t.url === url)) tabs.push({ label, url });
+      localStorage.setItem("tabs", JSON.stringify(tabs));
+      renderTabs(url);
+    }
+    function renderTabs(activeUrl) {
+      const tabs = JSON.parse(localStorage.getItem("tabs") || "[]");
+      if (!tabs.length) {
+        tabs.push({ label: "卡派", url: "/ui/kapi_export.html" });
+        localStorage.setItem("tabs", JSON.stringify(tabs));
+      }
+      tabsEl.innerHTML = "";
+      tabs.forEach(t => {
+        const el = document.createElement("div");
+        el.className = "tab" + (t.url === activeUrl ? " active" : "");
+        el.textContent = t.label;
+        el.onclick = () => location.href = t.url;
+        tabsEl.appendChild(el);
+      });
+    }
+    document.querySelectorAll(".side-item").forEach(el => {
+      el.addEventListener("click", () => {
+        const url = el.dataset.go;
+        if (!url) return;
+        openTab(el.textContent.trim(), url);
+        location.href = url;
+      });
+    });
+    renderTabs("/ui/kapi_export.html");
+
+    function parseTokens(raw) {
+      return String(raw || "").split(/[\n,\uFF0C;\s]+/g).map(s => s.trim()).filter(Boolean);
+    }
+
+    function showFilter(e, colIdx, label) {
+      activeCol = colIdx;
+      activeLabel = label;
+      document.getElementById("fTitle").textContent = `筛选：${label}`;
+      document.getElementById("fVal").value = filters[colIdx] || "";
+      const r = e.currentTarget.getBoundingClientRect();
+      fPop.style.left = `${Math.max(8, r.left)}px`;
+      fPop.style.top = `${r.bottom + 6}px`;
+      fPop.style.display = "block";
+    }
+
+    function renderChips() {
+      chipsEl.innerHTML = "";
+      Object.entries(filters).forEach(([k, v]) => {
+        if (!v) return;
+        const c = document.createElement("span");
+        c.className = "chip";
+        c.innerHTML = `${header[Number(k)] || k}: ${v} <span style="cursor:pointer;">×</span>`;
+        c.querySelector("span").onclick = () => {
+          delete filters[k];
+          renderTable();
+        };
+        chipsEl.appendChild(c);
+      });
+    }
+
+    function renderTable() {
+      headEl.innerHTML = "";
+      bodyEl.innerHTML = "";
+      const thSel = document.createElement("th");
+      thSel.textContent = "选择";
+      headEl.appendChild(thSel);
+      header.forEach((h, i) => {
+        const th = document.createElement("th");
+        th.textContent = h || `COL_${i+1}`;
+        th.onclick = (e) => showFilter(e, i, th.textContent);
+        headEl.appendChild(th);
+      });
+      let display = rows.map((r, idx) => ({ r, idx }));
+      Object.entries(filters).forEach(([k, v]) => {
+        const idx = Number(k);
+        const kw = String(v || "").toLowerCase();
+        if (!kw) return;
+        display = display.filter(obj => String(obj.r[idx] ?? "").toLowerCase().includes(kw));
+      });
+      display.forEach((obj) => {
+        const r = obj.r;
+        const tr = document.createElement("tr");
+        tr.dataset.rowIdx = String(obj.idx);
+        const tdCheck = document.createElement("td");
+        tdCheck.contentEditable = "false";
+        tdCheck.innerHTML = `<input type="checkbox" class="kapi-row-check" value="${obj.idx}" />`;
+        tr.appendChild(tdCheck);
+        r.forEach((v, i) => {
+          const td = document.createElement("td");
+          td.contentEditable = "true";
+          td.textContent = v ?? "";
+          td.addEventListener("input", () => {
+            const ridx = Number(tr.dataset.rowIdx || "-1");
+            if (ridx >= 0 && rows[ridx]) rows[ridx][i] = td.textContent;
+          });
+          tr.appendChild(td);
+        });
+        bodyEl.appendChild(tr);
+      });
+      summaryEl.textContent = `已导入 ${display.length} 行（总 ${rows.length} 行）`;
+      renderChips();
+    }
+
+    async function importRows() {
+      const tokens = parseTokens(document.getElementById("orderIds").value);
+      if (!tokens.length) {
+        alert("请先输入或从内部订单勾选后跳转。");
+        return;
+      }
+      const res = await fetch("/kapi-exports/preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(tokens),
+      });
+      const out = await res.json();
+      debugBox.textContent = JSON.stringify(out, null, 2);
+      header = out.header || [];
+      rows = out.rows || [];
+      rowOrderIds = out.row_order_ids || [];
+      if (!header.length) {
+        alert(`卡派导入失败：未返回模板头。\n输入token: ${tokens.join(",")}`);
+        return;
+      }
+      if (!rows.length) {
+        alert(`卡派导入为空。\n输入token: ${tokens.join(",")}\n已解析订单ID: ${(out.resolved_ids || []).join(",") || "无"}\n请看底部调试信息。`);
+      }
+      renderTable();
+    }
+
+    async function initTemplateHeader() {
+      try {
+        const res = await fetch("/kapi-exports/template-header");
+        const out = await res.json();
+        if (!res.ok || !Array.isArray(out.header) || !out.header.length) return;
+        if (!header.length) {
+          header = out.header;
+          const defs = out.defaults || {};
+          rows = Array.from({ length: 6 }).map(() => header.map(h => defs[h] || ""));
+          renderTable();
+          debugBox.textContent = JSON.stringify({ template_path: out.template_path, initialized: true }, null, 2);
+        }
+      } catch (e) {
+        debugBox.textContent = JSON.stringify({ init_error: String(e) }, null, 2);
+      }
+    }
+
+    async function exportRows() {
+      if (!header.length) { alert("请先导入订单"); return; }
+      const payload = { header, rows };
+      const res = await fetch("/kapi-exports/from-rows", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const out = await res.json();
+      if (!res.ok || out.error) {
+        alert(`导出失败: ${JSON.stringify(out)}`);
+        return;
+      }
+      alert(`导出成功：${out.total_rows} 行\n文件：${out.file}`);
+    }
+
+    function _getRowValue(row, aliases) {
+      for (const k of aliases) {
+        const i = header.indexOf(k);
+        if (i >= 0) {
+          const v = String(row[i] ?? "").trim();
+          if (v) return v;
+        }
+      }
+      return "";
+    }
+
+    function _addrCategoryToCode(v) {
+      const s = String(v || "").toLowerCase();
+      if (s.includes("with dock")) return 1;
+      if (s.includes("without dock")) return 2;
+      if (s.includes("residential")) return 3;
+      return 1;
+    }
+
+    function _shipType(v) {
+      const s = String(v || "").toUpperCase();
+      return s.includes("PALLET") ? 1 : 2;
+    }
+
+    function _packageType(v) {
+      const s = String(v || "").toUpperCase();
+      if (s.includes("CRATE")) return 14;
+      if (s.includes("PALLET")) return 11;
+      if (s.includes("CARTON")) return 3;
+      return 2;
+    }
+
+    function _toNum(v, d = 0) {
+      const n = Number(String(v || "").replace(/[^\d.\-]/g, ""));
+      return Number.isFinite(n) ? n : d;
+    }
+
+    async function ensureKapiConfig() {
+      let cfg = {};
+      try {
+        const res = await fetch("/config/kapi");
+        const out = await res.json();
+        if (res.ok && out && typeof out === "object") cfg = out;
+      } catch (_) {}
+      let apiKey = String(cfg.api_key || "").trim();
+      let baseUrl = String(cfg.base_url || "").trim() || "https://tran.wedoexpress.com";
+      if (!apiKey) {
+        apiKey = (prompt("请输入卡派 Api-Key（将保存到配置）", "") || "").trim();
+        if (!apiKey) return null;
+      }
+      const editedBase = prompt("卡派 Base URL（留空默认）", baseUrl);
+      if (editedBase !== null) {
+        baseUrl = String(editedBase || "https://tran.wedoexpress.com").trim();
+      }
+      try {
+        await fetch("/config/kapi", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ api_key: apiKey, base_url: baseUrl }),
+        });
+      } catch (_) {}
+      return { api_key: apiKey, base_url: baseUrl };
+    }
+
+    function buildFreightPayloadFromRow(row) {
+      const shipperService = _getRowValue(row, ["Shipper Service"]);
+      const receiverService = _getRowValue(row, ["Receiver Service"]);
+      const sizeUnitText = _getRowValue(row, ["Size Unit*"]).toLowerCase();
+      const sizeUnit = sizeUnitText.includes("kg") || sizeUnitText.includes("cm") ? 1 : 0;
+      return {
+        mode: 1,
+        shipper: {
+          postcode: _getRowValue(row, ["Shipper Zip Code*"]),
+          country: _getRowValue(row, ["Shipper Country*"]) || "US",
+          city: _getRowValue(row, ["Shipper City*"]),
+          state: _getRowValue(row, ["Shipper State*"]),
+          addressCategory: _addrCategoryToCode(_getRowValue(row, ["Shipper Address Type*"])),
+          specialService: shipperService.toLowerCase().includes("inside") ? [1] : [],
+          username: _getRowValue(row, ["Shipper Contact Name"]),
+          address1: _getRowValue(row, ["Shipper Address Line1"]),
+          address2: _getRowValue(row, ["Shipper Address Line2"]),
+          email: _getRowValue(row, ["Shipper Contact Email"]),
+          telephone: _getRowValue(row, ["Shipper Contact Phone"]),
+          pickupTime: _getRowValue(row, ["Pickup Date*"]),
+          addressName: _getRowValue(row, ["Shipper Address Name", "Shipper Contact Name"]),
+          timeRange: [
+            _getRowValue(row, ["Pickup Time From"]) || "09:30",
+            _getRowValue(row, ["Pickup Time To"]) || "17:30",
+          ],
+          customerOrderNo: _getRowValue(row, ["Customer orderNo"]),
+          reference: _getRowValue(row, ["Ref"]),
+          remark: _getRowValue(row, ["Remark", "备注"]) || "",
+        },
+        receiver: {
+          postcode: _getRowValue(row, ["Receiver Zip Code*"]),
+          country: _getRowValue(row, ["Receiver Country*"]) || "US",
+          city: _getRowValue(row, ["Receiver City*"]),
+          state: _getRowValue(row, ["Receiver State*"]),
+          addressCategory: _addrCategoryToCode(_getRowValue(row, ["Receiver Address Type*"])),
+          specialService: receiverService.toLowerCase().includes("appt") ? [2] : [],
+          username: _getRowValue(row, ["Receiver Contact Name"]),
+          email: _getRowValue(row, ["Receiver Contact Email", "Shipper Contact Email"]),
+          telephone: _getRowValue(row, ["Receiver Contact Phone"]),
+          isFba: 0,
+          address1: _getRowValue(row, ["Receiver Address Line1"]),
+          address2: _getRowValue(row, ["Receiver Address Line2"]),
+          addressName: _getRowValue(row, ["Receiver Address Name", "Receiver Contact Name"]),
+          timeRange: [
+            _getRowValue(row, ["Delivery Time From"]) || "09:00",
+            _getRowValue(row, ["Delivery Time To"]) || "16:30",
+          ],
+          remark: "",
+        },
+        orderInfo: {
+          sizeUnit: sizeUnit,
+          shipmentInfos: [
+            {
+              describe: _getRowValue(row, ["Name*", "Customer orderNo"]) || "Bathroom Vanity",
+              packageType: _packageType(_getRowValue(row, ["Package Type*"])),
+              packageQty: _toNum(_getRowValue(row, ["Package Qty*"]), 1),
+              shipType: _shipType(_getRowValue(row, ["Pallet Type*"])),
+              shipQty: _toNum(_getRowValue(row, ["Pallet Qty*"]), 1),
+              totalValue: _toNum(_getRowValue(row, ["Declared($)*"]), 1),
+              length: _toNum(_getRowValue(row, ["Length*", "Box Length"]), 1),
+              width: _toNum(_getRowValue(row, ["Width*", " Box Width"]), 1),
+              height: _toNum(_getRowValue(row, ["Height*", " Box Height"]), 1),
+              weight: _toNum(_getRowValue(row, ["Weight*", "Box Weight"]), 1),
+            },
+          ],
+        },
+      };
+    }
+
+    async function queryFreight() {
+      const checked = Array.from(document.querySelectorAll(".kapi-row-check:checked")).map(x => Number(x.value));
+      const rowIdx = checked.length ? checked[0] : 0;
+      const row = rows[rowIdx];
+      if (!row) { alert("请先导入并勾选一行卡派数据"); return; }
+      const cfg = await ensureKapiConfig();
+      if (!cfg || !cfg.api_key) {
+        alert("查询费用失败: missing api_key");
+        return;
+      }
+      const request_data = buildFreightPayloadFromRow(row);
+      const order_id = rowOrderIds[rowIdx] || null;
+      const res = await fetch("/internal-orders/kapi-query-freight", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ request_data, order_id, api_key: cfg.api_key, base_url: cfg.base_url }),
+      });
+      const out = await res.json();
+      lastFreight = { out, request_data, order_id };
+      feeBox.textContent = JSON.stringify(out, null, 2);
+      if (!res.ok || out.detail) {
+        alert(`查询费用失败: ${JSON.stringify(out)}`);
+        return;
+      }
+      const n = Array.isArray(out.feeList) ? out.feeList.length : 0;
+      alert(`查询费用完成：${n} 条报价；isCompleted=${String(out.isCompleted)}`);
+    }
+
+    async function createOrder() {
+      if (!lastFreight || !lastFreight.out) {
+        alert("请先执行“查询费用”");
+        return;
+      }
+      const cfg = await ensureKapiConfig();
+      if (!cfg || !cfg.api_key) {
+        alert("创建单据失败: missing api_key");
+        return;
+      }
+      const feeList = Array.isArray(lastFreight.out.feeList) ? lastFreight.out.feeList : [];
+      if (!feeList.length) {
+        alert("当前没有可用报价，请先查询费用并确认 feeList 有数据");
+        return;
+      }
+      const tips = feeList.map((f, i) => `${i + 1}. ${f.transportName || "-"} | ${f.carrierName || "-"} | ${f.totalCharge || "-"} | quoteNo=${f.quoteNo || ""}`).join("\n");
+      const pick = prompt(`请选择报价序号（1~${feeList.length}）\n${tips}`, "1");
+      const idx = Number(pick || "1") - 1;
+      if (!Number.isInteger(idx) || idx < 0 || idx >= feeList.length) {
+        alert("序号无效");
+        return;
+      }
+      const chosen = feeList[idx];
+      const req = { ...(lastFreight.request_data || {}) };
+      req.orderNo = chosen.orderNo || lastFreight.out.orderNo || req.orderNo;
+      req.quoteNo = chosen.quoteNo || req.quoteNo;
+      if (!req.orderNo || !req.quoteNo) {
+        alert("缺少 orderNo 或 quoteNo，无法创建单据");
+        return;
+      }
+      const res = await fetch("/internal-orders/kapi-create-order", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          request_data: req,
+          order_id: lastFreight.order_id,
+          api_key: cfg.api_key,
+          base_url: cfg.base_url,
+        }),
+      });
+      const out = await res.json();
+      feeBox.textContent = JSON.stringify({ lastFreight: lastFreight.out, createOrder: out }, null, 2);
+      if (!res.ok || out.detail || !out.ok) {
+        alert(`创建单据失败: ${JSON.stringify(out)}`);
+        return;
+      }
+      alert(`创建单据成功\norderNo=${out.orderNo}\ntrackNumber=${out.trackNumber || ""}\nisReady=${String(out.isReady)}`);
+    }
+
+    document.getElementById("importBtn").onclick = importRows;
+    document.getElementById("queryFeeBtn").onclick = queryFreight;
+    document.getElementById("createOrderBtn").onclick = createOrder;
+    document.getElementById("exportBtn").onclick = exportRows;
+    document.getElementById("clearFilterBtn").onclick = () => {
+      Object.keys(filters).forEach(k => delete filters[k]);
+      renderTable();
+    };
+
+    document.getElementById("fApply").onclick = () => {
+      filters[activeCol] = document.getElementById("fVal").value || "";
+      fPop.style.display = "none";
+      renderTable();
+    };
+    document.getElementById("fClear").onclick = () => {
+      delete filters[activeCol];
+      fPop.style.display = "none";
+      renderTable();
+    };
+    document.addEventListener("click", (e) => {
+      if (!fPop.contains(e.target) && e.target.tagName !== "TH") fPop.style.display = "none";
+    });
+
+    const params = new URLSearchParams(location.search);
+    const idsFromUrl = params.get("ids");
+    if (idsFromUrl) {
+      document.getElementById("orderIds").value = idsFromUrl;
+    } else {
+      const fromStore = localStorage.getItem("kapi_ids");
+      if (fromStore) document.getElementById("orderIds").value = fromStore;
+    }
+    initTemplateHeader();
+    if (document.getElementById("orderIds").value.trim()) importRows();
+  </script>
+</body>
+</html>

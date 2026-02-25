@@ -1,0 +1,1573 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>内部订单中心</title>
+  <style>
+    :root { --bg:#f4f6fb; --ink:#0f172a; --muted:#64748b; --line:#e2e8f0; --card:#fff; --accent:#2563eb; --dark:#0b1220; }
+    body { margin:0; font-family:"SF Pro Text",-apple-system,BlinkMacSystemFont,"Noto Sans SC",sans-serif; background:var(--bg); color:var(--ink); }
+    .layout { display:grid; grid-template-columns:72px 1fr; min-height:100vh; }
+    .sidebar { background:#111827; color:#cbd5e1; padding:12px 6px; display:flex; flex-direction:column; gap:10px; }
+    .side-item { text-align:center; font-size:11px; padding:8px 6px; border-radius:10px; cursor:pointer; }
+    .side-item.active { background:#1f2937; color:#fff; }
+    .main { display:flex; flex-direction:column; min-width:0; }
+    .topbar { background:#0b1220; color:#e5e7eb; padding:8px 16px; display:flex; gap:12px; align-items:center; }
+    .tabs { background:#fff; border-bottom:1px solid var(--line); padding:8px 16px; display:flex; gap:8px; flex-wrap:wrap; }
+    .tab { background:#f1f5f9; color:#111827; padding:6px 10px; border-radius:999px; font-size:12px; cursor:pointer; }
+    .tab.active { background:#111827; color:#fff; }
+    .content { padding:16px; }
+    .title-row { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+    .title-row h1 { margin:0; font-size:22px; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:16px; padding:12px; box-shadow:0 8px 20px rgba(15,23,42,0.06); }
+    .filters { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:10px; }
+    .filters input { padding:8px 10px; border:1px solid var(--line); border-radius:10px; background:#fff; }
+    .chip { background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; border-radius:999px; padding:6px 10px; font-size:12px; cursor:pointer; }
+    .chip.active { background:#111827; color:#fff; border-color:#111827; }
+    .chip.tag { background:#f8fafc; color:#0f172a; border-color:#e2e8f0; cursor:default; }
+    .btn { background:var(--accent); color:#fff; border:none; padding:8px 12px; border-radius:10px; cursor:pointer; font-size:12px; }
+    .toolbar { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:8px; }
+    .group-panel { margin-top:12px; }
+    .group-header { display:flex; justify-content:space-between; align-items:center; }
+    .group-bar { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
+    .group-btn { background:#fff; border:1px solid var(--line); border-radius:999px; padding:6px 10px; font-size:12px; cursor:pointer; }
+    .group-btn.active { background:#111827; color:#fff; }
+    .group-item { display:flex; align-items:center; gap:4px; }
+    .group-mini { border:1px solid var(--line); background:#fff; border-radius:8px; padding:4px 6px; font-size:11px; cursor:pointer; }
+    .table { margin-top:12px; background:#fff; border:1px solid var(--line); border-radius:16px; overflow:auto; }
+    table { width:100%; border-collapse:separate; border-spacing:0; }
+    th, td { padding:10px 12px; border-bottom:1px solid var(--line); text-align:left; font-size:12px; vertical-align:top; white-space:nowrap; }
+    th { color:var(--muted); font-weight:600; position:sticky; top:0; background:#f8fafc; z-index:2; }
+    .hidden-col { display:none; }
+    .img { width:36px; height:36px; border-radius:8px; object-fit:cover; background:#f2f2f7; display:block; }
+    .editable { cursor:text; }
+    .editable { display:block; min-height:16px; }
+    .editable[data-empty="1"] { color:#94a3b8; }
+    .inline-input { width:100%; border:1px solid var(--line); border-radius:8px; padding:6px 8px; font-size:12px; }
+    .row-toggle { background:#f1f5f9; border:none; border-radius:999px; padding:4px 8px; font-size:11px; cursor:pointer; margin-left:6px; }
+    .collapsed .cell-lines span:nth-child(n+2) { display:none; }
+    .date-cell { cursor:pointer; color:#2563eb; display:block; min-height:16px; }
+    .modal { position:fixed; inset:0; background:rgba(0,0,0,0.6); display:none; align-items:center; justify-content:center; z-index:50; }
+    .modal img { max-width:90vw; max-height:90vh; border-radius:12px; }
+    .helper { color:var(--muted); font-size:12px; }
+    .chipbar { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
+    .filter-pop { position:absolute; background:#fff; border:1px solid var(--line); border-radius:12px; padding:10px; box-shadow:0 12px 24px rgba(15,23,42,0.14); display:none; z-index:30; min-width:220px; }
+    .filter-pop label { font-size:12px; color:var(--muted); display:block; margin:6px 0 4px; }
+    .filter-pop input, .filter-pop select { width:100%; padding:6px 8px; border:1px solid var(--line); border-radius:8px; font-size:12px; }
+    .th-inner { display:flex; align-items:center; gap:6px; }
+    .sort-ind { font-size:10px; color:#94a3b8; }
+    th[data-col="客户地址"], td[data-col="客户地址"] { min-width:220px; max-width:280px; }
+    td[data-col="客户地址"] .editable { white-space:pre-line; word-break:break-word; overflow-wrap:anywhere; }
+    td[data-col="客户地址"] { white-space:normal; }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <div class="sidebar">
+      <div class="side-item" data-go="/ui/dashboard.html">首页</div>
+      <div class="side-item active" data-go="/ui/internal_orders.html">订单</div>
+      <div class="side-item" data-go="/ui/supplier_quote.html">报价</div>
+      <div class="side-item" data-go="/ui/kapi_export.html">卡派</div>
+      <div class="side-item" data-go="/ui/after_sales.html">售后</div>
+      <div class="side-item" data-go="/ui/customer_service.html">客服</div>
+      <div class="side-item" data-go="/ui/suppliers.html">供应商</div>
+    </div>
+    <div class="main">
+      <div class="topbar">终极 ERP · 内部订单中心 <span style="margin-left:8px;color:#94a3b8;font-size:12px;">v20260209-2</span></div>
+      <div class="tabs" id="tabs"></div>
+      <div class="content">
+        <div class="title-row">
+          <h1>内部订单中心</h1>
+          <div style="display:flex;gap:8px;">
+            <button class="btn" id="exportBtn">导出卡派</button>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:12px;">
+          <div class="filters">
+            <input id="kw" placeholder="关键词（订单号/店铺/产品名）" />
+            <input id="startDate" placeholder="开始日期 YYYY-MM-DD" />
+            <input id="endDate" placeholder="结束日期 YYYY-MM-DD" />
+            <div class="chip" id="todayChip">单日订单</div>
+            <button class="btn" id="filterBtn">筛选</button>
+            <button class="btn" id="clearFilterBtn">取消筛选</button>
+            <span class="helper">点击任意“出单日期”自动过滤该日期</span>
+          </div>
+          <div class="filters" style="margin-top:8px;">
+            <select id="viewSelect">
+              <option value="">快捷视图</option>
+            </select>
+            <button class="btn" id="saveViewBtn">保存筛选视图</button>
+            <span class="helper" style="margin-left:8px;">订单状态</span>
+            <button class="chip" id="statusUnshippedBtn">未发货</button>
+            <button class="chip" id="statusPendingBtn">待审核</button>
+            <button class="chip" id="statusShippedBtn">已发货</button>
+            <button class="chip" id="statusCanceledBtn">已取消</button>
+            <button class="chip" id="statusClearBtn">清除状态</button>
+            <button class="btn" id="refreshPendingBtn">刷新待审核</button>
+            <button class="btn" id="dedupeBtn" style="background:#0f766e;">清理重复订单</button>
+          </div>
+          <div class="chipbar" id="filterChips"></div>
+          <div class="toolbar">
+            <button class="btn" id="addRowBtn">新增行</button>
+            <button class="btn" id="addColBtn">新增列</button>
+            <button class="btn" id="addFormulaBtn">新增公式列</button>
+            <button class="btn" id="importTextBtn">粘贴订单文本</button>
+            <button class="btn" id="pasteImageBtn">粘贴图片URL</button>
+            <button class="btn" id="uploadImageBtn">上传图片</button>
+            <input id="uploadImageInput" type="file" accept="image/*" style="display:none;" />
+            <button class="btn" id="backfillBtn">补全ASIN/图片</button>
+            <button class="btn" id="refreshCodeBtn">刷新产品编码</button>
+            <button class="btn" id="pullDetailBtn">拉取订单详情</button>
+            <button class="btn" id="enrichAddrBtn">补全买家信息</button>
+            <button class="btn" id="kapiSignBtn">同步卡派签收图</button>
+            <button class="btn" id="quoteBtn">供应商报价</button>
+            <button class="btn" id="batchDeleteBtn" style="background:#dc2626;">批量删除</button>
+          </div>
+          <div class="group-panel">
+            <div class="group-header">
+              <div>列分组（可折叠展开）</div>
+              <div style="display:flex;gap:8px;">
+                <button class="btn" id="addGroupBtn">新增分组</button>
+                <button class="btn" id="toggleGroups">收起</button>
+              </div>
+            </div>
+            <div class="group-bar" id="groupBar"></div>
+          </div>
+        </div>
+
+        <div class="table">
+          <table>
+            <thead>
+              <tr id="headerRow"></tr>
+            </thead>
+            <tbody id="orderRows"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="imgModal">
+    <img id="modalImg" src="" alt="preview" />
+  </div>
+  <div class="modal" id="quoteModal">
+    <div class="card" style="min-width:320px;max-width:520px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <strong>选择供应商</strong>
+        <button class="btn" id="quoteCloseBtn">关闭</button>
+      </div>
+      <div id="supplierList" style="margin-top:12px;display:flex;flex-direction:column;gap:8px;"></div>
+      <button class="btn" id="quoteSubmitBtn" style="margin-top:12px;">发送报价</button>
+    </div>
+  </div>
+  <div class="modal" id="pasteModal">
+    <div class="card" style="min-width:320px;max-width:720px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <strong>粘贴亚马逊订单文本</strong>
+        <button class="btn" id="pasteCloseBtn">关闭</button>
+      </div>
+      <textarea id="pasteTextArea" rows="12" style="width:100%;margin-top:10px;"></textarea>
+      <button class="btn" id="pasteSubmitBtn" style="margin-top:10px;">导入</button>
+    </div>
+  </div>
+  <div class="filter-pop" id="colFilterPop">
+    <strong id="filterTitle" style="font-size:12px;"></strong>
+    <label>筛选类型</label>
+    <select id="filterType">
+      <option value="text">文本包含</option>
+      <option value="number">数值区间</option>
+      <option value="date">日期范围</option>
+      <option value="status">状态多选</option>
+    </select>
+    <div id="filterBody"></div>
+    <div style="display:flex;gap:6px;margin-top:8px;">
+      <button class="btn" id="sortAscBtn">升序</button>
+      <button class="btn" id="sortDescBtn">降序</button>
+      <button class="btn" id="sortClearBtn">清除排序</button>
+    </div>
+    <div style="display:flex;gap:6px;margin-top:8px;">
+      <button class="btn" id="applyFilterBtn">应用</button>
+      <button class="btn" id="clearColFilterBtn">清除</button>
+    </div>
+  </div>
+
+  <script>
+    const rowsEl = document.getElementById("orderRows");
+    const exportBtn = document.getElementById("exportBtn");
+    const headerRow = document.getElementById("headerRow");
+    const filterBtn = document.getElementById("filterBtn");
+    const todayChip = document.getElementById("todayChip");
+    const imgModal = document.getElementById("imgModal");
+    const modalImg = document.getElementById("modalImg");
+    const quoteBtn = document.getElementById("quoteBtn");
+    const pasteModal = document.getElementById("pasteModal");
+    const filterChips = document.getElementById("filterChips");
+    const colFilterPop = document.getElementById("colFilterPop");
+    const filterType = document.getElementById("filterType");
+    const filterBody = document.getElementById("filterBody");
+    const filterTitle = document.getElementById("filterTitle");
+    const viewSelect = document.getElementById("viewSelect");
+    let quickStatus = "";
+    let autoEnrichRunning = false;
+    let lastAutoEnrichAt = 0;
+    const autoEnrichTriedAt = new Map();
+
+    const tabsEl = document.getElementById("tabs");
+    function openTab(label, url) {
+      const tabs = JSON.parse(localStorage.getItem("tabs") || "[]");
+      if (!tabs.find(t => t.url === url)) tabs.push({ label, url });
+      localStorage.setItem("tabs", JSON.stringify(tabs));
+      renderTabs(url);
+    }
+    function renderTabs(activeUrl) {
+      const tabs = JSON.parse(localStorage.getItem("tabs") || "[]");
+      if (!tabs.length) {
+        tabs.push({ label: "订单", url: "/ui/internal_orders.html" });
+        localStorage.setItem("tabs", JSON.stringify(tabs));
+      }
+      tabsEl.innerHTML = "";
+      tabs.forEach(t => {
+        const el = document.createElement("div");
+        el.className = "tab" + (t.url === activeUrl ? " active" : "");
+        el.textContent = t.label;
+        el.onclick = () => location.href = t.url;
+        tabsEl.appendChild(el);
+      });
+    }
+    document.querySelectorAll(".side-item").forEach(el => {
+      el.addEventListener("click", () => {
+        const url = el.dataset.go;
+        if (!url) return;
+        openTab(el.textContent.trim(), url);
+        location.href = url;
+      });
+    });
+    renderTabs("/ui/internal_orders.html");
+
+    const templateHeaders = [
+      "序列","出单日期","产品图","厘米","英寸","区域","工厂内部型号","包装/尾程方式","货款已付","店铺","订单编号","内部订单号","产品名","供应商","采购数量","单价","总价","1688运输单号","下单日期","供应商出货日期","到花街日期","开船日期","到港日期","单号","头程","尾程","套数","每箱套数","总箱数","货代箱规","计费重量","花街单价","头程运费总价","包材费","出库费","国内运费","其他","每套运费成本","毛重小于68kg","长cm","宽cm","高cm","长in\n＜80","宽in","高in","镑重量\n＜150lb","自算计费重","客户地址","联邦方式","联邦单号","联邦美金","反弹","反弹退回","购买配送","联邦人民币","总成本","回款","利润","售价","被退款","索赔额","SKU","发货日","送达日","卡派后台单号","oversize 130及165","周长＜419","出货图","POD","签收图","其他","快递/卡派账单月份"
+    ];
+    const keyCount = {};
+    const baseColumns = templateHeaders.map((label) => {
+      const base = label.trim();
+      keyCount[base] = (keyCount[base] || 0) + 1;
+      const key = keyCount[base] > 1 ? `${base}__${keyCount[base]}` : base;
+      return { key, label: base, dataKey: base };
+    });
+
+    const baseGroups = [];
+    let customGroups = JSON.parse(localStorage.getItem("customGroups") || "[]");
+    function allGroups() { return baseGroups.concat(customGroups); }
+    let activeGroupKey = localStorage.getItem("activeGroupKey") || "";
+
+    const customColumns = JSON.parse(localStorage.getItem("customColumns") || "[]");
+    const formulaColumns = JSON.parse(localStorage.getItem("formulaColumns") || "[]");
+    const pageParams = new URLSearchParams(location.search);
+    const focusIds = (pageParams.get("ids") || "").split(",").map(x => x.trim()).filter(Boolean).map(x => Number(x)).filter(x => !Number.isNaN(x));
+    let activeSort = JSON.parse(localStorage.getItem("activeSort") || "null");
+    const colFilters = JSON.parse(localStorage.getItem("colFilters") || "{}");
+    const savedViews = JSON.parse(localStorage.getItem("savedViews") || "[]");
+    let lastItems = [];
+    let lastFilteredItems = [];
+    const columnTypes = {
+      "出单日期": "date",
+      "下单日期": "date",
+      "供应商出货日期": "date",
+      "到花街日期": "date",
+      "开船日期": "date",
+      "到港日期": "date",
+      "发货日": "date",
+      "送达日": "date",
+      "快递/卡派账单月份": "date",
+      "单价": "number",
+      "总价": "number",
+      "采购数量": "number",
+      "计费重量": "number",
+      "镑重量\n＜150lb": "number",
+      "长cm": "number",
+      "宽cm": "number",
+      "高cm": "number",
+      "长in\n＜80": "number",
+      "宽in": "number",
+      "高in": "number",
+    };
+
+    function allColumns() {
+      return [{ key: "select", label: "选择" }].concat(baseColumns, customColumns, formulaColumns);
+    }
+
+    function dataColumns() {
+      return allColumns().slice(1);
+    }
+
+    function colIndexToLabel(idx) {
+      let n = Number(idx) + 1;
+      let out = "";
+      while (n > 0) {
+        const rem = (n - 1) % 26;
+        out = String.fromCharCode(65 + rem) + out;
+        n = Math.floor((n - 1) / 26);
+      }
+      return out;
+    }
+
+    function colRefToIndex(ref) {
+      const s = String(ref || "").trim().toUpperCase();
+      if (!s) return -1;
+      if (/^\d+$/.test(s)) {
+        const n = Number(s) - 1;
+        return n >= 0 ? n : -1;
+      }
+      if (!/^[A-Z]+$/.test(s)) return -1;
+      let val = 0;
+      for (const ch of s) val = val * 26 + (ch.charCodeAt(0) - 64);
+      return val - 1;
+    }
+
+    function resolveColumnKeys(raw) {
+      const cols = dataColumns();
+      const tokens = String(raw || "").split(",").map(x => x.trim()).filter(Boolean);
+      const out = [];
+      tokens.forEach((t) => {
+        const idx = colRefToIndex(t);
+        if (idx >= 0 && idx < cols.length) {
+          out.push(cols[idx].key);
+          return;
+        }
+        const hit = cols.find(c => c.label === t || c.key === t);
+        if (hit) out.push(hit.key);
+      });
+      return Array.from(new Set(out));
+    }
+
+    function buildHeader() {
+      headerRow.innerHTML = "";
+      const cols = allColumns();
+      cols.forEach((col, i) => {
+        const th = document.createElement("th");
+        if (col.key === "select") {
+          th.innerHTML = `<input type="checkbox" id="selectAll" />`;
+        } else {
+          const wrap = document.createElement("div");
+          wrap.className = "th-inner";
+          const colNo = document.createElement("span");
+          colNo.className = "sort-ind";
+          colNo.textContent = colIndexToLabel(i - 1);
+          const label = document.createElement("span");
+          label.textContent = col.label;
+          label.style.cursor = "pointer";
+          label.addEventListener("click", (e) => {
+            e.stopPropagation();
+            openColFilter(col, th);
+          });
+          const sort = document.createElement("span");
+          sort.className = "sort-ind";
+          if (activeSort && activeSort.key === col.key) {
+            sort.textContent = activeSort.dir === "asc" ? "▲" : "▼";
+          } else {
+            sort.textContent = "";
+          }
+          wrap.appendChild(colNo);
+          wrap.appendChild(label);
+          wrap.appendChild(sort);
+          th.appendChild(wrap);
+        }
+        th.dataset.col = col.key;
+        headerRow.appendChild(th);
+      });
+      const thOp = document.createElement("th");
+      thOp.textContent = "操作";
+      headerRow.appendChild(thOp);
+    }
+
+    function getValue(order, col) {
+      function isEmptyLike(v) {
+        if (v === null || v === undefined) return true;
+        const s = String(v).trim();
+        if (!s) return true;
+        const low = s.toLowerCase();
+        if (low === "none" || low === "null" || low === "nan") return true;
+        const parts = low.replace(/[,]/g, " ").split(/\s+/).filter(Boolean);
+        return parts.length > 0 && parts.every(p => p === "none" || p === "null" || p === "nan");
+      }
+      const dataKey = col.dataKey || col.key;
+      if (dataKey in order) {
+        const val = order[dataKey];
+        if (!isEmptyLike(val)) return val;
+      }
+      if (dataKey === "订单编号" && order.platform_order_no) return order.platform_order_no;
+      if (dataKey === "内部订单号" && order.internal_order_no) return order.internal_order_no;
+      if (dataKey === "店铺" && order.shop_name) return order.shop_name;
+      if (dataKey === "订单状态" && order.order_status) return order.order_status;
+      if (dataKey === "单号" && order.tracking_no) return order.tracking_no;
+      if (dataKey === "出单日期" && order.purchase_time) return order.purchase_time;
+      const ext = order.ext || {};
+      const v = ext[dataKey];
+      if (isEmptyLike(v)) return "";
+      return v;
+    }
+
+    function evaluateFormula(expr, order) {
+      try {
+        const ctxRaw = {};
+        const cols = dataColumns();
+        cols.forEach((c, idx) => {
+          const val = Number(getValue(order, { key: c.key })) || 0;
+          const letter = colIndexToLabel(idx);
+          ctxRaw[letter] = val;
+          ctxRaw[c.key] = val;
+          if (c.dataKey) ctxRaw[c.dataKey] = val;
+          ctxRaw[`COL${idx + 1}`] = val;
+        });
+        const ctx = new Proxy(ctxRaw, { get: (obj, k) => obj[k] ?? 0 });
+        // eslint-disable-next-line no-new-func
+        const fn = new Function("ctx", `with(ctx){ return ${expr}; }`);
+        return fn(ctx);
+      } catch (e) {
+        return "";
+      }
+    }
+
+    function renderCell(order, col, orderId) {
+      function zoomImageUrl(url) {
+        if (!url) return "";
+        return String(url).replace(/_SL\d+_\.jpg/i, "_SL1000_.jpg");
+      }
+      if (col.dataKey === "产品图") {
+        const url = getValue(order, col);
+        const wrap = document.createElement("div");
+        const img = document.createElement("img");
+        img.className = "img";
+        if (url) img.src = url;
+        img.addEventListener("click", () => {
+          if (!url) return;
+          modalImg.src = zoomImageUrl(url);
+          imgModal.style.display = "flex";
+        });
+        img.addEventListener("dblclick", async () => {
+          const next = prompt("请输入图片URL", url || "");
+          if (next === null) return;
+          await saveField(orderId, "product_image", next);
+          img.src = next;
+        });
+        wrap.appendChild(img);
+        return wrap;
+      }
+      if (col.type === "formula") {
+        const span = document.createElement("span");
+        span.textContent = evaluateFormula(col.expr || "", order);
+        return span;
+      }
+      const span = document.createElement("span");
+      span.className = "editable";
+      span.dataset.key = col.dataKey || col.key;
+      const val = getValue(order, col);
+      if (val === "") {
+        span.dataset.empty = "1";
+        span.innerHTML = "&nbsp;";
+      } else {
+        if ((col.dataKey || col.key) === "产品名" && String(val).includes("\n")) {
+          span.style.whiteSpace = "normal";
+          span.innerHTML = String(val).replace(/\n/g, "<br>");
+        } else {
+          span.textContent = val;
+        }
+      }
+      return span;
+    }
+
+    async function saveField(orderId, key, value) {
+      await fetch(`/internal-orders/${orderId}/fields`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ [key]: value }),
+      });
+    }
+
+    function bindEditable(el, orderId) {
+      if (!el || !el.classList || !el.classList.contains("editable")) return;
+      el.addEventListener("click", () => {
+        const key = el.dataset.key;
+        const input = document.createElement("input");
+        input.className = "inline-input";
+        input.value = el.textContent || "";
+        el.replaceWith(input);
+        input.focus();
+        input.addEventListener("blur", async () => {
+          const val = input.value;
+          await saveField(orderId, key, val);
+          const span = document.createElement("span");
+          span.className = "editable";
+          span.dataset.key = key;
+          span.textContent = val || "";
+          input.replaceWith(span);
+          bindEditable(span, orderId);
+        });
+      }, { once: true });
+    }
+
+    function attachEditHandlers(tr, orderId) {
+      tr.querySelectorAll(".editable").forEach(el => bindEditable(el, orderId));
+    }
+
+    const mockData = [
+      {
+        id: 10001,
+        internal_order_no: "IO20260206A",
+        platform_order_no: "113-0000000-0000001",
+        shop_name: "TIZAZO-US",
+        order_status: "待发货",
+        purchase_time: "2026-02-03 08:10:00",
+        product_image: "",
+        tracking_no: "397344121319",
+        ext: {
+          product_name: "LED智能镜柜",
+          sku: "HFT-Brown-54in",
+          purchase_qty: 1,
+          unit_price: 1700,
+          factory_model: "C590",
+          marks: "YFYBGDCGFBV04-1.1m",
+          fedex_method: "购买配送FedEx",
+          customer_address: "7563 ROKEBY CT WEST CHESTER, OH",
+        },
+        packages: [{ length_cm: 110, width_cm: 60, height_cm: 30, length_in: 43.3, width_in: 23.6, height_in: 11.8, weight_lb: 50, billed_weight: 55 }],
+      },
+    ];
+
+    function applyFilters(items) {
+      const kw = (document.getElementById("kw").value || "").toLowerCase();
+      const start = document.getElementById("startDate").value;
+      const end = document.getElementById("endDate").value;
+      return items.filter(o => {
+        const ext = o.ext || {};
+        const target = `${ext["内部订单号"] || o.internal_order_no || ""} ${ext["订单编号"] || o.platform_order_no || ""} ${ext["店铺"] || o.shop_name || ""} ${ext["产品名"] || ext["product_name"] || ""}`.toLowerCase();
+        if (kw && !target.includes(kw)) return false;
+        if (start && (o.purchase_time || "").slice(0,10) < start) return false;
+        if (end && (o.purchase_time || "").slice(0,10) > end) return false;
+        for (const [key, f] of Object.entries(colFilters)) {
+          const val = String(getValue(o, { key }) || "");
+          if (f.type === "text" && f.value) {
+            if (!val.toLowerCase().includes(String(f.value).toLowerCase())) return false;
+          }
+          if (f.type === "number") {
+            const num = Number(val);
+            if (f.min !== "" && !Number.isNaN(Number(f.min)) && num < Number(f.min)) return false;
+            if (f.max !== "" && !Number.isNaN(Number(f.max)) && num > Number(f.max)) return false;
+          }
+          if (f.type === "date") {
+            const date = val.slice(0,10);
+            if (f.start && date < f.start) return false;
+            if (f.end && date > f.end) return false;
+          }
+          if (f.type === "status") {
+            if (f.values && f.values.length) {
+              const wantsEmpty = f.values.includes("(空)");
+              if (val === "" && wantsEmpty) return true;
+              if (!f.values.includes(val)) return false;
+            }
+          }
+        }
+        return true;
+      });
+    }
+
+    function applySorting(items) {
+      if (!activeSort) return items;
+      const { key, dir } = activeSort;
+      return items.slice().sort((a, b) => {
+        const av = getValue(a, { key });
+        const bv = getValue(b, { key });
+        if (av === bv) return 0;
+        if (dir === "asc") return String(av).localeCompare(String(bv), "zh");
+        return String(bv).localeCompare(String(av), "zh");
+      });
+    }
+
+    function renderFilterChips() {
+      filterChips.innerHTML = "";
+      Object.entries(colFilters).forEach(([key, f]) => {
+        const col = allColumns().find(c => c.key === key);
+        const labelName = col ? col.label : key;
+        let label = `${labelName}: `;
+        if (f.type === "text") label += f.value || "";
+        if (f.type === "number") label += `${f.min || ""} ~ ${f.max || ""}`;
+        if (f.type === "date") label += `${f.start || ""} ~ ${f.end || ""}`;
+        if (f.type === "status") label += (f.values || []).join(",");
+        const chip = document.createElement("span");
+        chip.className = "chip tag";
+        chip.textContent = label;
+        const close = document.createElement("span");
+        close.textContent = " ×";
+        close.style.cursor = "pointer";
+        close.addEventListener("click", () => {
+          delete colFilters[key];
+          localStorage.setItem("colFilters", JSON.stringify(colFilters));
+          renderFilterChips();
+          loadOrders();
+        });
+        chip.appendChild(close);
+        filterChips.appendChild(chip);
+      });
+    }
+
+    function hasAnyActiveFilters() {
+      const kw = (document.getElementById("kw").value || "").trim();
+      const start = (document.getElementById("startDate").value || "").trim();
+      const end = (document.getElementById("endDate").value || "").trim();
+      const hasCol = Object.keys(colFilters || {}).length > 0;
+      const hasSort = !!activeSort;
+      return !!(kw || start || end || hasCol || hasSort);
+    }
+
+    function clearAllFilters() {
+      document.getElementById("kw").value = "";
+      document.getElementById("startDate").value = "";
+      document.getElementById("endDate").value = "";
+      todayChip.classList.remove("active");
+      Object.keys(colFilters).forEach(k => delete colFilters[k]);
+      localStorage.setItem("colFilters", JSON.stringify(colFilters));
+      activeSort = null;
+      localStorage.setItem("activeSort", JSON.stringify(activeSort));
+      quickStatus = "";
+      setStatusButtons("");
+    }
+
+    function setStatusButtons(active) {
+      const map = {
+        unshipped: "statusUnshippedBtn",
+        pending: "statusPendingBtn",
+        shipped: "statusShippedBtn",
+        canceled: "statusCanceledBtn",
+      };
+      Object.entries(map).forEach(([k, id]) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.classList.toggle("active", active === k);
+      });
+    }
+
+    function applyQuickStatus(kind) {
+      quickStatus = kind || "";
+      setStatusButtons(quickStatus);
+      const key = "订单状态";
+      if (!quickStatus) {
+        delete colFilters[key];
+      } else if (quickStatus === "unshipped") {
+        colFilters[key] = { type: "status", values: ["待发货", "待审核", "未发货", "待付款", "同步中", "已同步"] };
+      } else if (quickStatus === "shipped") {
+        colFilters[key] = { type: "status", values: ["已发货", "平台发货", "部分发货", "fulfilled"] };
+      } else if (quickStatus === "pending") {
+        colFilters[key] = { type: "status", values: ["待审核", "Pending", "pending"] };
+      } else if (quickStatus === "canceled") {
+        colFilters[key] = { type: "status", values: ["已取消", "已取消/不发货", "取消", "Canceled"] };
+      }
+      localStorage.setItem("colFilters", JSON.stringify(colFilters));
+      loadOrders();
+    }
+
+    async function loadOrders() {
+      const res = await fetch("/internal-orders?limit=5000&offset=0");
+      const data = await res.json();
+      rowsEl.innerHTML = "";
+      const items = Array.isArray(data.items) ? data.items : mockData;
+      const focused = focusIds.length ? items.filter(x => focusIds.includes(Number(x.id))) : items;
+      lastItems = focused.slice();
+      const filtered = applySorting(applyFilters(focused));
+      lastFilteredItems = filtered.slice();
+      if (filtered.length === 0 && items.length > 0 && hasAnyActiveFilters()) {
+        const tr = document.createElement("tr");
+        const td = document.createElement("td");
+        td.colSpan = allColumns().length + 1;
+        td.innerHTML = `当前有 ${items.length} 条订单，但已被筛选条件过滤为空。<button class="btn" id="resetFilterInlineBtn" style="margin-left:8px;">清空筛选</button>`;
+        tr.appendChild(td);
+        rowsEl.appendChild(tr);
+        const btn = document.getElementById("resetFilterInlineBtn");
+        if (btn) {
+          btn.addEventListener("click", () => {
+            clearAllFilters();
+            loadOrders();
+          });
+        }
+        renderFilterChips();
+        return;
+      }
+      filtered.forEach((o, idx) => {
+        const tr = document.createElement("tr");
+        const firstCell = document.createElement("td");
+        firstCell.dataset.col = "select";
+        firstCell.innerHTML = `<input type="checkbox" class="order-check" value="${o.id}" />`;
+        tr.appendChild(firstCell);
+        allColumns().slice(1).forEach(col => {
+          const td = document.createElement("td");
+          td.dataset.col = col.key;
+          if (col.dataKey === "序列") {
+            td.textContent = String(idx + 1);
+          } else if (col.dataKey === "出单日期") {
+            const text = getValue(o, col) || "";
+            const span = document.createElement("span");
+            span.className = "date-cell";
+            if (text) {
+              span.textContent = text;
+            } else {
+              span.innerHTML = "&nbsp;";
+              span.dataset.empty = "1";
+            }
+            span.addEventListener("click", () => {
+              if (!text) return;
+              document.getElementById("startDate").value = text.slice(0, 10);
+              document.getElementById("endDate").value = text.slice(0, 10);
+              loadOrders();
+            });
+            span.addEventListener("dblclick", async () => {
+              const input = document.createElement("input");
+              input.className = "inline-input";
+              input.value = text || "";
+              span.replaceWith(input);
+              input.focus();
+              input.addEventListener("blur", async () => {
+                const val = input.value;
+                await saveField(o.id, "出单日期", val);
+                const newSpan = document.createElement("span");
+                newSpan.className = "date-cell";
+                newSpan.textContent = val;
+                input.replaceWith(newSpan);
+              });
+            });
+            td.appendChild(span);
+          } else {
+            td.appendChild(renderCell(o, col, o.id));
+          }
+          tr.appendChild(td);
+        });
+        const tdOp = document.createElement("td");
+        tdOp.innerHTML = `<button class="btn" onclick="location.href='/ui/internal_order_detail.html?id=${o.id}'">详情</button>
+          <button class="btn" data-del="${o.id}" style="background:#ef4444;">删除</button>`;
+        tr.appendChild(tdOp);
+        rowsEl.appendChild(tr);
+        attachEditHandlers(tr, o.id);
+        tr.querySelectorAll("[data-del]").forEach(btn => {
+          btn.addEventListener("click", async () => {
+            if (!confirm("确认删除该订单？")) return;
+            await fetch(`/internal-orders/${btn.dataset.del}`, { method: "DELETE" });
+            loadOrders();
+          });
+        });
+        tr.classList.add("collapsed");
+        const toggleBtn = document.createElement("button");
+        toggleBtn.className = "row-toggle";
+        toggleBtn.textContent = "展开";
+        toggleBtn.addEventListener("click", () => {
+          const expanded = !tr.classList.contains("collapsed");
+          if (expanded) {
+            tr.classList.add("collapsed");
+            toggleBtn.textContent = "展开";
+          } else {
+            tr.classList.remove("collapsed");
+            toggleBtn.textContent = "收起";
+          }
+        });
+        firstCell.appendChild(toggleBtn);
+      });
+      applyGroupView(activeGroupKey);
+      renderFilterChips();
+      autoEnrichMissingBuyerInfo(focused);
+    }
+
+    function isEmptyInfo(v) {
+      if (v === null || v === undefined) return true;
+      const s = String(v).trim();
+      if (!s) return true;
+      const low = s.toLowerCase();
+      if (low === "none" || low === "null" || low === "nan") return true;
+      const parts = low.replace(/[,]/g, " ").split(/\s+/).filter(Boolean);
+      return parts.length > 0 && parts.every(p => p === "none" || p === "null" || p === "nan");
+    }
+
+    async function autoEnrichMissingBuyerInfo(items) {
+      if (autoEnrichRunning) return;
+      if (!Array.isArray(items) || !items.length) return;
+      const now = Date.now();
+      if (now - lastAutoEnrichAt < 60 * 1000) return;
+      const candidateIds = [];
+      items.forEach((o) => {
+        const oid = Number(o.id);
+        if (!oid) return;
+        const orderNo = String(getValue(o, { key: "订单编号", dataKey: "订单编号" }) || o.platform_order_no || "").trim();
+        if (!orderNo) return;
+        const addr = getValue(o, { key: "客户地址", dataKey: "客户地址" });
+        const phone = getValue(o, { key: "电话", dataKey: "电话" });
+        const missing = isEmptyInfo(addr) || isEmptyInfo(phone);
+        if (!missing) return;
+        const lastTry = autoEnrichTriedAt.get(oid) || 0;
+        if (now - lastTry < 10 * 60 * 1000) return;
+        candidateIds.push(oid);
+      });
+      if (!candidateIds.length) return;
+      const ids = candidateIds.slice(0, 20);
+      ids.forEach(id => autoEnrichTriedAt.set(id, now));
+      autoEnrichRunning = true;
+      lastAutoEnrichAt = now;
+      try {
+        const res = await fetch("/integrations/lingxing/enrich-fbm-addresses", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ order_ids: ids }),
+        });
+        const out = await res.json();
+        if (res.ok && Number(out.updated || 0) > 0) {
+          setTimeout(() => loadOrders(), 1200);
+        }
+      } catch (e) {
+        console.warn("auto enrich failed", e);
+      } finally {
+        autoEnrichRunning = false;
+      }
+    }
+
+    exportBtn.addEventListener("click", async () => {
+      const ids = Array.from(document.querySelectorAll(".order-check:checked")).map((x) => parseInt(x.value, 10));
+      if (ids.length === 0) {
+        alert("请先勾选订单");
+        return;
+      }
+      try {
+        await fetch("/internal-orders/refresh-product-codes", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ order_ids: ids }),
+        });
+      } catch (_) {}
+      localStorage.setItem("kapi_ids", ids.join(","));
+      location.href = `/ui/kapi_export.html?ids=${ids.join(",")}`;
+    });
+
+    function applyGroupView(groupKey) {
+      const cols = dataColumns();
+      const visibleSet = new Set();
+      if (!groupKey) {
+        cols.forEach(c => visibleSet.add(c.key));
+      } else {
+        const g = allGroups().find(x => x.key === groupKey);
+        (g?.cols || []).forEach(k => visibleSet.add(k));
+      }
+      const allColEls = Array.from(document.querySelectorAll("[data-col]"));
+      cols.forEach(c => {
+        const show = visibleSet.has(c.key);
+        allColEls.forEach(el => {
+          if (el.dataset.col === c.key) {
+            el.classList.toggle("hidden-col", !show);
+          }
+        });
+      });
+      activeGroupKey = groupKey || "";
+      localStorage.setItem("activeGroupKey", activeGroupKey);
+      document.querySelectorAll(".group-btn").forEach(btn => {
+        btn.classList.toggle("active", (btn.dataset.group || "") === activeGroupKey);
+      });
+    }
+
+    function buildGroupBar() {
+      const bar = document.getElementById("groupBar");
+      bar.innerHTML = "";
+
+      const allWrap = document.createElement("div");
+      allWrap.className = "group-item";
+      const allBtn = document.createElement("button");
+      allBtn.className = "group-btn";
+      allBtn.dataset.group = "";
+      allBtn.textContent = "全部列";
+      allBtn.addEventListener("click", () => applyGroupView(""));
+      allWrap.appendChild(allBtn);
+      bar.appendChild(allWrap);
+
+      allGroups().forEach(g => {
+        const wrap = document.createElement("div");
+        wrap.className = "group-item";
+        const btn = document.createElement("button");
+        btn.className = "group-btn";
+        btn.textContent = g.label;
+        btn.dataset.group = g.key;
+        btn.addEventListener("click", () => applyGroupView(g.key));
+        wrap.appendChild(btn);
+
+        if (String(g.key || "").startsWith("custom_")) {
+          const edit = document.createElement("button");
+          edit.className = "group-mini";
+          edit.textContent = "编辑";
+          edit.addEventListener("click", () => {
+            const name = prompt("分组名称", g.label || "");
+            if (!name) return;
+            const refs = prompt("列引用（字母/数字/列名/列key，逗号分隔）", (g.cols || []).join(","));
+            if (!refs) return;
+            const cols = resolveColumnKeys(refs);
+            if (!cols.length) { alert("未匹配到列"); return; }
+            g.label = name.trim();
+            g.cols = cols;
+            localStorage.setItem("customGroups", JSON.stringify(customGroups));
+            buildGroupBar();
+            applyGroupView(g.key);
+          });
+          const del = document.createElement("button");
+          del.className = "group-mini";
+          del.textContent = "删除";
+          del.addEventListener("click", () => {
+            if (!confirm(`删除分组「${g.label}」？`)) return;
+            const i = customGroups.findIndex(x => x.key === g.key);
+            if (i >= 0) customGroups.splice(i, 1);
+            localStorage.setItem("customGroups", JSON.stringify(customGroups));
+            if (activeGroupKey === g.key) activeGroupKey = "";
+            buildGroupBar();
+            applyGroupView(activeGroupKey);
+          });
+          wrap.appendChild(edit);
+          wrap.appendChild(del);
+        }
+        bar.appendChild(wrap);
+      });
+      applyGroupView(activeGroupKey);
+    }
+
+    document.getElementById("addRowBtn").addEventListener("click", async () => {
+      const res = await fetch("/internal-orders", { method: "POST" });
+      const data = await res.json();
+      if (data.id) loadOrders();
+    });
+
+    document.getElementById("addColBtn").addEventListener("click", () => {
+      const key = prompt("列字段 key（英文）");
+      const label = prompt("列名称（中文）");
+      if (!key || !label) return;
+      const posRef = prompt("插入位置（字母/数字，可留空=末尾，例如 A、C、27）", "");
+      const idx = colRefToIndex(posRef);
+      if (idx >= 0 && idx <= dataColumns().length) {
+        const baseLen = baseColumns.length;
+        let insertAt = idx - baseLen;
+        if (insertAt < 0) insertAt = 0;
+        if (insertAt > customColumns.length) insertAt = customColumns.length;
+        customColumns.splice(insertAt, 0, { key, label });
+      } else {
+        customColumns.push({ key, label });
+      }
+      localStorage.setItem("customColumns", JSON.stringify(customColumns));
+      buildHeader();
+      loadOrders();
+    });
+
+    document.getElementById("addFormulaBtn").addEventListener("click", () => {
+      const key = prompt("公式列 key（英文）");
+      const label = prompt("列名称（中文）");
+      const expr = prompt("公式表达式（支持列字母/列key，例如 A+B 或 采购数量*单价 或 COL3+COL4）");
+      if (!key || !label || !expr) return;
+      formulaColumns.push({ key, label, type: "formula", expr });
+      localStorage.setItem("formulaColumns", JSON.stringify(formulaColumns));
+      buildHeader();
+      loadOrders();
+    });
+
+    imgModal.addEventListener("click", () => { imgModal.style.display = "none"; });
+    document.getElementById("quoteCloseBtn").addEventListener("click", () => {
+      document.getElementById("quoteModal").style.display = "none";
+    });
+
+    todayChip.addEventListener("click", () => {
+      todayChip.classList.toggle("active");
+      const today = new Date().toISOString().slice(0, 10);
+      if (todayChip.classList.contains("active")) {
+        document.getElementById("startDate").value = today;
+        document.getElementById("endDate").value = today;
+      } else {
+        document.getElementById("startDate").value = "";
+        document.getElementById("endDate").value = "";
+      }
+      loadOrders();
+    });
+
+    async function openQuoteModal() {
+      let list = JSON.parse(localStorage.getItem("suppliers") || "[]");
+      if (!list.length) {
+        try {
+          const r = await fetch("/auth/suppliers");
+          if (r.ok) {
+            const j = await r.json();
+            const items = Array.isArray(j.items) ? j.items : [];
+            list = items
+              .filter(x => x.is_active !== false)
+              .map(x => ({
+                name: x.supplier_name || "",
+                contact: x.contact || "",
+                phone: x.phone || "",
+                prefix: x.prefix || "F",
+                start: Number(x.start || 1),
+              }));
+            localStorage.setItem("suppliers", JSON.stringify(list));
+          }
+        } catch (_) {}
+      }
+      const box = document.getElementById("supplierList");
+      box.innerHTML = "";
+      if (!list.length) {
+        box.innerHTML = `
+          <div class='helper'>暂无供应商，请输入供应商名称：</div>
+          <input id="tempSupplierInput" class="inline-input" placeholder="例如：吉嘉" />
+        `;
+      } else {
+        list.forEach(s => {
+          const row = document.createElement("label");
+          row.style.display = "flex";
+          row.style.gap = "8px";
+          row.innerHTML = `<input type='checkbox' class='supplier-check' value='${s.name}' /> ${s.name}`;
+          box.appendChild(row);
+        });
+      }
+      document.getElementById("quoteModal").style.display = "flex";
+    }
+
+    quoteBtn.addEventListener("click", async () => {
+      const ids = Array.from(document.querySelectorAll(".order-check:checked")).map((x) => parseInt(x.value, 10));
+      if (ids.length === 0) { alert("请先勾选订单"); return; }
+      await openQuoteModal();
+      document.getElementById("quoteSubmitBtn").onclick = async () => {
+        let list = Array.from(document.querySelectorAll(".supplier-check:checked")).map(x => x.value);
+        if (!list.length) {
+          const temp = document.getElementById("tempSupplierInput");
+          if (temp && temp.value.trim()) {
+            list = [temp.value.trim()];
+          }
+        }
+        if (!list.length) { alert("请选择供应商"); return; }
+        const supplierRules = {};
+        const allSup = JSON.parse(localStorage.getItem("suppliers") || "[]");
+        (allSup || []).forEach(s => {
+          if (!s || !s.name) return;
+          supplierRules[s.name] = { prefix: s.prefix || "F", start: Number(s.start || 1) };
+        });
+        const chkRes = await fetch("/supplier-quotes/check-existing", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ order_ids: ids }),
+        });
+        const chk = await chkRes.json();
+        if ((chk.count || 0) > 0) {
+          const sample = (chk.items || []).slice(0, 5).map(x => `${x.quote_no}(订单${x.order_id},${x.supplier_name || "-"})`).join(", ");
+          const action = prompt(
+            `检测到已存在报价单 ${chk.count} 条。\n示例: ${sample}\n输入 1=跳转现有报价单，输入 2=重新生成新报价单`,
+            "1"
+          );
+          if (action === "1") {
+            const first = (chk.items || [])[0];
+            if (first && first.quote_no) {
+              document.getElementById("quoteModal").style.display = "none";
+              location.href = `/ui/supplier_quote.html?quote_no=${encodeURIComponent(first.quote_no)}`;
+              return;
+            }
+          } else if (action !== "2") {
+            alert("已取消操作");
+            return;
+          }
+        }
+        const res = await fetch("/supplier-quotes/batch-create", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ order_ids: ids, suppliers: list, supplier_rules: supplierRules }),
+        });
+        const out = await res.json();
+        if (!res.ok || out.error || out.detail) {
+          alert(`生成报价失败: ${JSON.stringify(out)}`);
+          return;
+        }
+        document.getElementById("quoteModal").style.display = "none";
+        const nos = (out.quote_nos || []);
+        if (!nos.length) {
+          alert(`调试：未生成报价单。\n返回：${JSON.stringify(out)}`);
+          return;
+        }
+        const miss = (out.debug && out.debug.missing_marks) ? out.debug.missing_marks : [];
+        if (miss.length) {
+          const preview = miss.slice(0, 5).map(x => `${x.quote_no}#订单${x.order_id}`).join(", ");
+          alert(`已生成报价单: ${nos.join(", ")}\n警告：有 ${miss.length} 条箱唛为空。\n示例：${preview}\n请把这些订单的“产品名英文段（如 XXX-1.42m）”补齐后重试。`);
+        } else {
+          alert(`已生成报价单: ${nos.join(", ")}\n调试: ${JSON.stringify(out.debug || {})}`);
+        }
+        location.href = `/ui/supplier_quote.html`;
+      };
+    });
+
+    document.getElementById("batchDeleteBtn").addEventListener("click", async () => {
+      const ids = Array.from(document.querySelectorAll(".order-check:checked")).map((x) => parseInt(x.value, 10));
+      if (!ids.length) { alert("请先勾选订单"); return; }
+      if (!confirm(`确认批量删除 ${ids.length} 条订单？`)) return;
+      for (const id of ids) {
+        await fetch(`/internal-orders/${id}`, { method: "DELETE" });
+      }
+      alert(`已删除 ${ids.length} 条订单`);
+      loadOrders();
+    });
+
+    document.getElementById("toggleGroups").addEventListener("click", () => {
+      const bar = document.getElementById("groupBar");
+      const btn = document.getElementById("toggleGroups");
+      const hidden = bar.style.display === "none";
+      bar.style.display = hidden ? "flex" : "none";
+      btn.textContent = hidden ? "收起" : "展开";
+    });
+
+    document.getElementById("addGroupBtn").addEventListener("click", () => {
+      const name = prompt("分组名称");
+      if (!name) return;
+      const labels = prompt("请输入列引用（列名/列key/字母/数字）用逗号分隔，例如 A,C,F 或 订单编号,SKU");
+      if (!labels) return;
+      const cols = resolveColumnKeys(labels);
+      if (!cols.length) { alert("未匹配到列名"); return; }
+      const key = `custom_${Date.now()}`;
+      customGroups.push({ key, label: name, cols });
+      localStorage.setItem("customGroups", JSON.stringify(customGroups));
+      buildGroupBar();
+      applyGroupView(key);
+    });
+
+    document.getElementById("importTextBtn").addEventListener("click", async () => {
+      document.getElementById("pasteTextArea").value = "";
+      pasteModal.style.display = "flex";
+    });
+    document.getElementById("pasteCloseBtn").addEventListener("click", () => {
+      pasteModal.style.display = "none";
+    });
+    document.getElementById("pasteSubmitBtn").addEventListener("click", async () => {
+      const raw = document.getElementById("pasteTextArea").value;
+      if (!raw.trim()) { alert("请输入文本"); return; }
+      const res = await fetch("/internal-orders/import-amazon-text", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: raw }),
+      });
+      const out = await res.json();
+      pasteModal.style.display = "none";
+      const extra = out.detected ? `\\n识别订单: ${out.detected.join(", ")}` : "";
+      const dbg = out.debug ? `\\n文本头: ${out.debug.text_head}\\n匹配数: ${out.debug.match_count}\\n数字头: ${out.debug.digits_head || ""}\\n版本: ${out.debug.parser_version || ""}` : "";
+      alert(`已导入: 新建 ${out.created} 更新 ${out.updated}${extra}${dbg}`);
+      loadOrders();
+    });
+
+    document.getElementById("pasteImageBtn").addEventListener("click", async () => {
+      const ids = Array.from(document.querySelectorAll(".order-check:checked")).map((x) => parseInt(x.value, 10));
+      if (ids.length === 0) { alert("请先勾选订单"); return; }
+      const url = prompt("请输入图片URL（可粘贴 Amazon 缩略图链接）", "");
+      if (!url) return;
+      for (const id of ids) {
+        await saveField(id, "产品图", url);
+        await saveField(id, "product_image", url);
+      }
+      alert(`已更新 ${ids.length} 条订单图片`);
+      loadOrders();
+    });
+
+    document.getElementById("uploadImageBtn").addEventListener("click", () => {
+      const ids = Array.from(document.querySelectorAll(".order-check:checked")).map((x) => parseInt(x.value, 10));
+      if (ids.length === 0) { alert("请先勾选订单"); return; }
+      document.getElementById("uploadImageInput").click();
+    });
+    document.getElementById("uploadImageInput").addEventListener("change", async (e) => {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      const ids = Array.from(document.querySelectorAll(".order-check:checked")).map((x) => parseInt(x.value, 10));
+      if (ids.length === 0) { alert("请先勾选订单"); return; }
+      const reader = new FileReader();
+      reader.onload = async () => {
+        const dataUrl = String(reader.result || "");
+        for (const id of ids) {
+          await saveField(id, "产品图", dataUrl);
+          await saveField(id, "product_image", dataUrl);
+        }
+        alert(`已上传并更新 ${ids.length} 条订单图片`);
+        loadOrders();
+      };
+      reader.readAsDataURL(file);
+      e.target.value = "";
+    });
+
+    document.getElementById("backfillBtn").addEventListener("click", async () => {
+      const ids = Array.from(document.querySelectorAll(".order-check:checked")).map((x) => parseInt(x.value, 10));
+      if (ids.length === 0) { alert("请先勾选订单"); return; }
+      const res = await fetch("/internal-orders/backfill-detail", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ order_ids: ids }),
+      });
+      const out = await res.json();
+      alert(`已补全: ${out.updated}\\n已有ASIN: ${out.with_asin || 0}\\n已有SKU: ${out.with_sku || 0}\\n已有图片: ${out.with_img || 0}${out.errors && out.errors.length ? "\\n错误: " + JSON.stringify(out.errors) : ""}`);
+      loadOrders();
+    });
+    document.getElementById("refreshCodeBtn").addEventListener("click", async () => {
+      const ids = Array.from(document.querySelectorAll(".order-check:checked")).map((x) => parseInt(x.value, 10));
+      const res = await fetch("/internal-orders/refresh-product-codes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ order_ids: ids }),
+      });
+      const out = await res.json();
+      alert(`编码刷新完成\n总数: ${out.total || 0}\n更新: ${out.updated || 0}\n跳过: ${out.skipped || 0}`);
+      loadOrders();
+    });
+
+    document.getElementById("pullDetailBtn").addEventListener("click", async () => {
+      const ids = Array.from(document.querySelectorAll(".order-check:checked")).map((x) => parseInt(x.value, 10));
+      const res = await fetch("/internal-orders/pull-order-detail", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ order_ids: ids }),
+      });
+      const out = await res.json();
+      alert(`已拉取详情\\n总订单: ${out.stats?.total_orders || 0}\\n返回详情: ${out.stats?.detail_rows || 0}\\nASIN: ${out.stats?.asin || 0}\\nSKU: ${out.stats?.sku || 0}\\n图片: ${out.stats?.img || 0}\\n空item: ${out.stats?.item_empty || 0}`);
+      loadOrders();
+    });
+    document.getElementById("enrichAddrBtn").addEventListener("click", async () => {
+      const btn = document.getElementById("enrichAddrBtn");
+      const ids = Array.from(document.querySelectorAll(".order-check:checked")).map((x) => parseInt(x.value, 10));
+      if (!ids.length) {
+        alert("请先勾选要补全的订单");
+        return;
+      }
+      const oldText = btn.textContent;
+      btn.textContent = "补全中...";
+      btn.disabled = true;
+      try {
+        const res = await fetch("/integrations/lingxing/enrich-fbm-addresses", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ order_ids: ids }),
+        });
+        const out = await res.json();
+        if (!res.ok) {
+          throw new Error(out.detail || JSON.stringify(out));
+        }
+        const dbg = Array.isArray(out.debug_misses) && out.debug_misses.length
+          ? `\\n调试: ${JSON.stringify(out.debug_misses.slice(0,3))}`
+          : "";
+        const fillStats = `\\n地址补全: ${out.updated_address || 0}\\n发货日补全: ${out.updated_ship_date || 0}\\n送达日补全: ${out.updated_deliver_date || 0}`;
+        const diag = Array.isArray(out.diagnostics) && out.diagnostics.length
+          ? `\\n诊断: ${JSON.stringify(out.diagnostics.slice(0,3))}`
+          : "";
+        const dbInfo = out.db_file ? `\\nDB: ${out.db_file}` : "";
+        const idsInfo = Array.isArray(out.updated_ids) ? `\\n更新ID: ${out.updated_ids.slice(0,10).join(",")}` : "";
+        alert(`已补全买家信息\\n更新订单: ${out.updated || 0}\\n解析订单号: ${out.resolved || 0}\\n缺少订单号: ${out.missing_order_no || 0}\\n未命中详情: ${out.missing || 0}\\nlist补全: ${out.used_list || 0}${fillStats}${idsInfo}${dbInfo}${dbg}${diag}`);
+        loadOrders();
+      } catch (e) {
+        alert(`补全失败: ${e.message || e}`);
+      } finally {
+        btn.textContent = oldText;
+        btn.disabled = false;
+      }
+    });
+
+    document.getElementById("kapiSignBtn").addEventListener("click", async () => {
+      const ids = Array.from(document.querySelectorAll(".order-check:checked")).map((x) => parseInt(x.value, 10));
+      if (!ids.length) {
+        alert("请先勾选订单");
+        return;
+      }
+      const oldKey = localStorage.getItem("kapi_api_key") || "";
+      const oldBase = localStorage.getItem("kapi_base_url") || "https://tran.wedoexpress.com";
+      let apiKey = oldKey;
+      let baseUrl = oldBase;
+      const needPrompt = !apiKey;
+      if (needPrompt) {
+        apiKey = prompt("未检测到本地Api-Key，请输入（也可在配置页保存）", oldKey) || "";
+        if (!apiKey.trim()) {
+          // allow backend config fallback
+          apiKey = "";
+        }
+        baseUrl = prompt("Base URL（留空用配置页）", oldBase) || oldBase;
+      }
+      localStorage.setItem("kapi_api_key", (apiKey || "").trim());
+      localStorage.setItem("kapi_base_url", (baseUrl || "").trim());
+      const res = await fetch("/internal-orders/sync-kapi-sign", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ order_ids: ids, api_key: (apiKey || "").trim(), base_url: (baseUrl || "").trim() }),
+      });
+      const out = await res.json();
+      if (!res.ok || out.detail) {
+        alert(`同步失败: ${JSON.stringify(out)}`);
+        return;
+      }
+      const details = Array.isArray(out.details) ? out.details.slice(0, 5) : [];
+      const miss = Array.isArray(out.missing_examples) ? out.missing_examples.slice(0, 5) : [];
+      alert(
+        `卡派同步完成\n更新: ${out.updated || 0}\n请求单号: ${out.requested || 0}\n缺少卡派后台单号: ${out.missing_kapi_no || 0}` +
+        `${details.length ? `\n示例: ${JSON.stringify(details)}` : ""}` +
+        `${miss.length ? `\n缺少示例: ${JSON.stringify(miss)}` : ""}`
+      );
+      loadOrders();
+    });
+
+    document.getElementById("clearFilterBtn").addEventListener("click", () => {
+      clearAllFilters();
+      loadOrders();
+    });
+
+    function openColFilter(col, th) {
+      filterTitle.textContent = col.label;
+      const inferred = columnTypes[col.key] || "text";
+      const cur = { ...(colFilters[col.key] || {}), type: inferred };
+      filterType.value = cur.type || "text";
+      renderFilterBody(cur);
+      const rect = th.getBoundingClientRect();
+      colFilterPop.style.top = `${rect.bottom + window.scrollY + 4}px`;
+      colFilterPop.style.left = `${rect.left + window.scrollX}px`;
+      colFilterPop.style.display = "block";
+      colFilterPop.dataset.col = col.key;
+    }
+
+    function renderFilterBody(cur) {
+      filterBody.innerHTML = "";
+      if (filterType.value === "text") {
+        filterBody.innerHTML = `<label>包含</label><input id="filterText" value="${cur.value || ""}" />`;
+      } else if (filterType.value === "number") {
+        filterBody.innerHTML = `<label>最小值</label><input id="filterMin" value="${cur.min || ""}" /><label>最大值</label><input id="filterMax" value="${cur.max || ""}" />`;
+      } else if (filterType.value === "date") {
+        filterBody.innerHTML = `<label>开始</label><input id="filterStart" value="${cur.start || ""}" placeholder="YYYY-MM-DD" /><label>结束</label><input id="filterEnd" value="${cur.end || ""}" placeholder="YYYY-MM-DD" />`;
+      } else if (filterType.value === "status") {
+        const key = colFilterPop.dataset.col;
+        const rawVals = lastItems.map(o => {
+          const v = String(getValue(o, { key }) || "");
+          return v.replace(/\s+/g, " ").trim();
+        });
+        let list = Array.from(new Set(rawVals)).filter(v => v.length);
+        if (!list.length) {
+          list = ["待审核", "待发货", "已发货", "已取消", "部分发货"];
+        }
+        list = list.map(v => v.length ? v : "(空)");
+        if (!list.includes("(空)")) list.unshift("(空)");
+        const selected = cur.values || [];
+        const box = document.createElement("div");
+        if (!list.length) {
+          box.innerHTML = `<div class='helper'>暂无可选值，可手动输入（逗号分隔）</div>
+            <input id="statusManualInput" placeholder="例如：已发货,待审核" />`;
+          filterBody.appendChild(box);
+          return;
+        }
+        list.forEach(v => {
+          const row = document.createElement("label");
+          row.style.display = "flex";
+          row.style.gap = "6px";
+          const input = document.createElement("input");
+          input.type = "checkbox";
+          input.className = "status-check";
+          input.value = v;
+          if (selected.includes(v)) input.checked = true;
+          row.appendChild(input);
+          const text = document.createElement("span");
+          text.textContent = v;
+          row.appendChild(text);
+          box.appendChild(row);
+        });
+        filterBody.appendChild(box);
+      }
+    }
+
+    filterType.addEventListener("change", () => renderFilterBody({}));
+    document.getElementById("applyFilterBtn").addEventListener("click", () => {
+      const key = colFilterPop.dataset.col;
+      if (!key) return;
+      const type = filterType.value;
+      const next = { type };
+      if (type === "text") next.value = document.getElementById("filterText").value || "";
+      if (type === "number") {
+        next.min = document.getElementById("filterMin").value || "";
+        next.max = document.getElementById("filterMax").value || "";
+      }
+      if (type === "date") {
+        next.start = document.getElementById("filterStart").value || "";
+        next.end = document.getElementById("filterEnd").value || "";
+      }
+      if (type === "status") {
+        const manual = document.getElementById("statusManualInput");
+        if (manual && manual.value.trim()) {
+          next.values = manual.value.split(",").map(s => s.trim()).filter(Boolean);
+        } else {
+          next.values = Array.from(document.querySelectorAll(".status-check:checked")).map(x => x.value);
+        }
+      }
+      colFilters[key] = next;
+      localStorage.setItem("colFilters", JSON.stringify(colFilters));
+      colFilterPop.style.display = "none";
+      loadOrders();
+    });
+    document.getElementById("clearColFilterBtn").addEventListener("click", () => {
+      const key = colFilterPop.dataset.col;
+      if (key) delete colFilters[key];
+      localStorage.setItem("colFilters", JSON.stringify(colFilters));
+      colFilterPop.style.display = "none";
+      loadOrders();
+    });
+    document.addEventListener("click", (e) => {
+      if (!colFilterPop.contains(e.target)) {
+        colFilterPop.style.display = "none";
+      }
+    });
+
+    document.getElementById("sortAscBtn").addEventListener("click", () => {
+      const key = colFilterPop.dataset.col;
+      if (!key) return;
+      activeSort = { key, dir: "asc" };
+      localStorage.setItem("activeSort", JSON.stringify(activeSort));
+      colFilterPop.style.display = "none";
+      loadOrders();
+    });
+    document.getElementById("sortDescBtn").addEventListener("click", () => {
+      const key = colFilterPop.dataset.col;
+      if (!key) return;
+      activeSort = { key, dir: "desc" };
+      localStorage.setItem("activeSort", JSON.stringify(activeSort));
+      colFilterPop.style.display = "none";
+      loadOrders();
+    });
+    document.getElementById("sortClearBtn").addEventListener("click", () => {
+      activeSort = null;
+      localStorage.setItem("activeSort", JSON.stringify(activeSort));
+      colFilterPop.style.display = "none";
+      loadOrders();
+    });
+
+    function loadViews() {
+      viewSelect.innerHTML = `<option value="">快捷视图</option>`;
+      savedViews.forEach((v, idx) => {
+        const opt = document.createElement("option");
+        opt.value = String(idx);
+        opt.textContent = v.name;
+        viewSelect.appendChild(opt);
+      });
+    }
+    document.getElementById("saveViewBtn").addEventListener("click", () => {
+      const name = prompt("视图名称");
+      if (!name) return;
+      savedViews.push({ name, kw: document.getElementById("kw").value || "", start: document.getElementById("startDate").value || "", end: document.getElementById("endDate").value || "", colFilters: JSON.parse(JSON.stringify(colFilters)), sort: activeSort });
+      localStorage.setItem("savedViews", JSON.stringify(savedViews));
+      loadViews();
+    });
+    document.getElementById("statusUnshippedBtn").addEventListener("click", () => applyQuickStatus("unshipped"));
+    document.getElementById("statusPendingBtn").addEventListener("click", () => applyQuickStatus("pending"));
+    document.getElementById("statusShippedBtn").addEventListener("click", () => applyQuickStatus("shipped"));
+    document.getElementById("statusCanceledBtn").addEventListener("click", () => applyQuickStatus("canceled"));
+    document.getElementById("statusClearBtn").addEventListener("click", () => applyQuickStatus(""));
+    document.getElementById("refreshPendingBtn").addEventListener("click", async () => {
+      const selected = Array.from(document.querySelectorAll(".order-check:checked")).map((x) => parseInt(x.value, 10)).filter(Boolean);
+      let ids = selected;
+      if (!ids.length) {
+        ids = (lastFilteredItems || [])
+          .filter(o => {
+            const s = String(getValue(o, { key: "订单状态", dataKey: "订单状态" }) || "").trim();
+            return ["待审核", "Pending", "pending"].includes(s);
+          })
+          .map(o => Number(o.id))
+          .filter(Boolean);
+      }
+      if (!ids.length) {
+        alert("没有可刷新的待审核订单。可先勾选订单后再点刷新。");
+        return;
+      }
+      const res = await fetch("/internal-orders/refresh-pending-status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ order_ids: ids, only_pending: true }),
+      });
+      const out = await res.json();
+      if (!res.ok || out.detail) {
+        alert(`刷新待审核失败: ${JSON.stringify(out)}`);
+        return;
+      }
+      alert(`刷新完成\n目标订单: ${out.total || 0}\n命中详情: ${out.detail_hits || 0}\n已更新: ${out.updated || 0}`);
+      loadOrders();
+    });
+    document.getElementById("dedupeBtn").addEventListener("click", async () => {
+      const selected = Array.from(document.querySelectorAll(".order-check:checked")).map((x) => parseInt(x.value, 10)).filter(Boolean);
+      const msg = selected.length
+        ? `将清理勾选范围内的重复订单，勾选数: ${selected.length}。是否继续？`
+        : "将清理全库重复订单（按订单号去重，保留信息更完整的一条）。是否继续？";
+      if (!confirm(msg)) return;
+      const res = await fetch("/internal-orders/deduplicate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ order_ids: selected }),
+      });
+      const out = await res.json();
+      if (!res.ok || out.detail) {
+        alert(`清理失败: ${JSON.stringify(out)}`);
+        return;
+      }
+      alert(`清理完成\n重复组: ${out.groups || 0}\n删除重复: ${out.removed || 0}\n保留主记录: ${out.kept || 0}`);
+      loadOrders();
+    });
+    viewSelect.addEventListener("change", () => {
+      const idx = viewSelect.value;
+      if (idx === "") return;
+      const v = savedViews[Number(idx)];
+      if (!v) return;
+      document.getElementById("kw").value = v.kw || "";
+      document.getElementById("startDate").value = v.start || "";
+      document.getElementById("endDate").value = v.end || "";
+      Object.keys(colFilters).forEach(k => delete colFilters[k]);
+      Object.assign(colFilters, v.colFilters || {});
+      activeSort = v.sort || null;
+      localStorage.setItem("colFilters", JSON.stringify(colFilters));
+      localStorage.setItem("activeSort", JSON.stringify(activeSort));
+      loadOrders();
+    });
+
+    headerRow.addEventListener("change", (e) => {
+      const target = e.target;
+      if (target && target.id === "selectAll") {
+        const checked = target.checked;
+        document.querySelectorAll(".order-check").forEach(cb => { cb.checked = checked; });
+      }
+    });
+
+    filterBtn.addEventListener("click", loadOrders);
+    buildHeader();
+    buildGroupBar();
+    loadViews();
+    loadOrders();
+
+    // Auto sync Lingxing once per day to keep newest orders loaded.
+    (async () => {
+      const key = "autoLingxingSyncDay";
+      const today = new Date().toISOString().slice(0, 10);
+      if (localStorage.getItem(key) === today) return;
+      localStorage.setItem(key, today);
+      try {
+        const res = await fetch("/integrations/lingxing/sync-fbm-orders", { method: "POST" });
+        const out = await res.json();
+        if (!res.ok || !out || !out.job_id) {
+          localStorage.removeItem(key);
+          console.warn("auto sync skipped", out);
+          return;
+        }
+        setTimeout(() => { loadOrders(); }, 15000);
+      } catch (e) {
+        localStorage.removeItem(key);
+        console.warn("auto sync failed", e);
+      }
+    })();
+
+    // Auto backfill once per 6 hours
+    (async () => {
+      const last = Number(localStorage.getItem("autoBackfillAt") || "0");
+      if (Date.now() - last < 6 * 60 * 60 * 1000) return;
+      localStorage.setItem("autoBackfillAt", String(Date.now()));
+      try {
+        const res = await fetch("/internal-orders/backfill-detail", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ order_ids: [] }),
+        });
+        const out = await res.json();
+        if (out.errors && out.errors.length) {
+          console.warn("auto backfill errors", out.errors);
+        }
+        loadOrders();
+      } catch (e) {}
+    })();
+  </script>
+</body>
+</html>

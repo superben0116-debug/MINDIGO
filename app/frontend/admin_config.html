@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>后台配置</title>
+  <style>
+    :root {
+      --bg: #f2f5f0;
+      --ink: #1c241c;
+      --accent: #3a6b35;
+      --card: #ffffff;
+      --muted: #6b7a6a;
+    }
+    body { margin:0; font-family:"Cardo","Noto Serif SC",serif; background:linear-gradient(180deg,#f2f5f0,#e7efe5); color:var(--ink); }
+    .wrap { max-width: 1000px; margin: 32px auto; padding: 16px; }
+    .title { display:flex; justify-content:space-between; align-items:center; }
+    .card { background:var(--card); border-radius:12px; padding:16px; box-shadow:0 4px 16px rgba(0,0,0,0.08); margin-top:16px; }
+    .grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+    .field label { font-size:12px; color:var(--muted); display:block; margin-bottom:6px; }
+    .field input, .field textarea { width:100%; padding:10px; border:1px solid #ccd8c9; border-radius:8px; }
+    .btn { background:var(--accent); color:#fff; border:none; padding:10px 14px; border-radius:8px; cursor:pointer; }
+    .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="title">
+      <h1>后台配置</h1>
+      <button class="btn" id="saveBtn">保存配置</button>
+    </div>
+
+    <div class="card">
+      <h3>领星接口配置</h3>
+      <div class="grid">
+        <div class="field"><label>App ID</label><input id="lxAppId" placeholder="LINGXING_APP_ID" /></div>
+        <div class="field"><label>App Secret</label><input id="lxAppSecret" placeholder="LINGXING_APP_SECRET" /></div>
+        <div class="field"><label>Access Token（自动）</label><input id="lxAccessToken" placeholder="自动获取" readonly /></div>
+        <div class="field"><label>SID 列表（逗号分隔，留空或填 ALL 为全店铺）</label><input id="lxSidList" placeholder="ALL" /></div>
+      </div>
+      <div class="row" style="margin-top:12px;">
+        <button class="btn" id="tokenBtn">手动刷新 Token</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>卡派打单接口配置</h3>
+      <div class="grid">
+        <div class="field"><label>Base URL</label><input id="kapiBaseUrl" placeholder="https://tran.wedoexpress.com" /></div>
+        <div class="field"><label>Api-Key</label><input id="kapiApiKey" placeholder="Api-Key" /></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>卡派发货方配置</h3>
+      <div class="grid">
+        <div class="field"><label>Zip</label><input id="shipperZip" placeholder="SHIPPER_ZIP" /></div>
+        <div class="field"><label>City</label><input id="shipperCity" placeholder="SHIPPER_CITY" /></div>
+        <div class="field"><label>State</label><input id="shipperState" placeholder="SHIPPER_STATE" /></div>
+        <div class="field"><label>Country</label><input id="shipperCountry" placeholder="SHIPPER_COUNTRY" /></div>
+        <div class="field"><label>Address Type</label><input id="shipperAddressType" placeholder="SHIPPER_ADDRESS_TYPE" /></div>
+        <div class="field"><label>Service</label><input id="shipperService" placeholder="SHIPPER_SERVICE" /></div>
+        <div class="field"><label>Contact Name</label><input id="shipperContactName" placeholder="SHIPPER_CONTACT_NAME" /></div>
+        <div class="field"><label>Contact Phone</label><input id="shipperContactPhone" placeholder="SHIPPER_CONTACT_PHONE" /></div>
+        <div class="field"><label>Contact Email</label><input id="shipperContactEmail" placeholder="SHIPPER_CONTACT_EMAIL" /></div>
+        <div class="field"><label>Address Name</label><input id="shipperAddressName" placeholder="SHIPPER_ADDRESS_NAME" /></div>
+        <div class="field"><label>Address Line1</label><input id="shipperAddressLine1" placeholder="SHIPPER_ADDRESS_LINE1" /></div>
+        <div class="field"><label>Address Line2</label><input id="shipperAddressLine2" placeholder="SHIPPER_ADDRESS_LINE2" /></div>
+        <div class="field"><label>Pickup Time From</label><input id="shipperPickupFrom" placeholder="SHIPPER_PICKUP_TIME_FROM" /></div>
+        <div class="field"><label>Pickup Time To</label><input id="shipperPickupTo" placeholder="SHIPPER_PICKUP_TIME_TO" /></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>地址字段检测</h3>
+      <div class="field">
+        <label>粘贴领星订单详情 data（JSON）</label>
+        <textarea id="detectInput" rows="6" placeholder='{"buyer_name":"...","receiver_zip":"..."}'></textarea>
+      </div>
+      <div class="row" style="margin-top:8px;">
+        <button class="btn" id="detectBtn">检测字段</button>
+        <button class="btn" id="saveMappingBtn">保存地址映射</button>
+      </div>
+      <div class="field" style="margin-top:12px;">
+        <label>地址字段映射（JSON）</label>
+        <textarea id="mappingInput" rows="6" placeholder='{"name":["buyer_name","receiver_name"],"phone":["buyer_phone"]}'></textarea>
+      </div>
+      <div id="detectResult" style="margin-top:12px;color:#3b4a3b;"></div>
+    </div>
+  </div>
+
+  <script>
+    async function loadConfig() {
+      const res = await fetch("/config");
+      if (!res.ok) return;
+      const data = await res.json();
+
+      if (data.lingxing) {
+        document.getElementById("lxAppId").value = data.lingxing.app_id || "";
+        document.getElementById("lxAppSecret").value = data.lingxing.app_secret || "";
+        document.getElementById("lxAccessToken").value = data.lingxing.access_token || "";
+        document.getElementById("lxSidList").value = data.lingxing.sid_list || "";
+      }
+      if (data.shipper) {
+        document.getElementById("shipperZip").value = data.shipper.zip || "";
+        document.getElementById("shipperCity").value = data.shipper.city || "";
+        document.getElementById("shipperState").value = data.shipper.state || "";
+        document.getElementById("shipperCountry").value = data.shipper.country || "";
+        document.getElementById("shipperAddressType").value = data.shipper.address_type || "";
+        document.getElementById("shipperService").value = data.shipper.service || "";
+        document.getElementById("shipperContactName").value = data.shipper.contact_name || "";
+        document.getElementById("shipperContactPhone").value = data.shipper.contact_phone || "";
+        document.getElementById("shipperContactEmail").value = data.shipper.contact_email || "";
+        document.getElementById("shipperAddressName").value = data.shipper.address_name || "";
+        document.getElementById("shipperAddressLine1").value = data.shipper.address_line1 || "";
+        document.getElementById("shipperAddressLine2").value = data.shipper.address_line2 || "";
+        document.getElementById("shipperPickupFrom").value = data.shipper.pickup_time_from || "";
+        document.getElementById("shipperPickupTo").value = data.shipper.pickup_time_to || "";
+      }
+      if (data.kapi) {
+        document.getElementById("kapiBaseUrl").value = data.kapi.base_url || "https://tran.wedoexpress.com";
+        document.getElementById("kapiApiKey").value = data.kapi.api_key || "";
+      }
+      if (data.address_mapping) {
+        document.getElementById("mappingInput").value = JSON.stringify(data.address_mapping, null, 2);
+      }
+    }
+
+    async function saveConfig() {
+      const lingxing = {
+        app_id: document.getElementById("lxAppId").value,
+        app_secret: document.getElementById("lxAppSecret").value,
+        access_token: document.getElementById("lxAccessToken").value,
+        sid_list: document.getElementById("lxSidList").value,
+      };
+      const shipper = {
+        zip: document.getElementById("shipperZip").value,
+        city: document.getElementById("shipperCity").value,
+        state: document.getElementById("shipperState").value,
+        country: document.getElementById("shipperCountry").value,
+        address_type: document.getElementById("shipperAddressType").value,
+        service: document.getElementById("shipperService").value,
+        contact_name: document.getElementById("shipperContactName").value,
+        contact_phone: document.getElementById("shipperContactPhone").value,
+        contact_email: document.getElementById("shipperContactEmail").value,
+        address_name: document.getElementById("shipperAddressName").value,
+        address_line1: document.getElementById("shipperAddressLine1").value,
+        address_line2: document.getElementById("shipperAddressLine2").value,
+        pickup_time_from: document.getElementById("shipperPickupFrom").value,
+        pickup_time_to: document.getElementById("shipperPickupTo").value,
+      };
+      const kapi = {
+        base_url: document.getElementById("kapiBaseUrl").value,
+        api_key: document.getElementById("kapiApiKey").value,
+      };
+
+      await fetch("/config/lingxing", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(lingxing),
+      });
+
+      await fetch("/config/shipper", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(shipper),
+      });
+      await fetch("/config/kapi", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(kapi),
+      });
+
+      alert("配置已保存");
+    }
+
+    document.getElementById("saveBtn").addEventListener("click", saveConfig);
+    document.getElementById("tokenBtn").addEventListener("click", async () => {
+      const res = await fetch("/integrations/lingxing/refresh-token", { method: "POST" });
+      const out = await res.json();
+      if (out.access_token) {
+        document.getElementById("lxAccessToken").value = out.access_token;
+        alert("已获取新的 Access Token");
+      } else {
+        alert("获取失败: " + JSON.stringify(out));
+      }
+    });
+    document.getElementById("detectBtn").addEventListener("click", async () => {
+      let payload = {};
+      try {
+        payload = JSON.parse(document.getElementById("detectInput").value || "{}");
+      } catch (e) {
+        alert("JSON 格式不正确");
+        return;
+      }
+      const res = await fetch("/config/address-detect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ data: payload }),
+      });
+      const out = await res.json();
+      document.getElementById("detectResult").innerText = (out.keys || []).join(", ");
+    });
+
+    document.getElementById("saveMappingBtn").addEventListener("click", async () => {
+      let mapping = {};
+      try {
+        mapping = JSON.parse(document.getElementById("mappingInput").value || "{}");
+      } catch (e) {
+        alert("映射 JSON 格式不正确");
+        return;
+      }
+      await fetch("/config/address-mapping", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(mapping),
+      });
+      alert("地址映射已保存");
+    });
+
+    loadConfig();
+  </script>
+</body>
+</html>
