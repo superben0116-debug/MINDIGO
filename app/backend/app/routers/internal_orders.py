@@ -698,6 +698,15 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
                 if value not in (None, "") and str(value) not in str(cell.value):
                     cell.value = f"{cell.value}\n{value}"
 
+        def _clear_cell_force(r: int, c: int):
+            ar, ac = _merged_anchor(r, c)
+            cell = ws.cell(ar, ac)
+            cell.value = ""
+            try:
+                cell.hyperlink = None
+            except Exception:
+                pass
+
         for idx, data in enumerate(flat_orders, start=1):
             start_row = 2 + (idx - 1) * block_size
             # insert 3 rows
@@ -767,11 +776,11 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
             if image_col:
                 img_url = data.get("产品图", "")
                 # 不写URL文本，改为真正图片对象（Excel可点击查看/放大）
-                _set_value_safe(start_row, image_col, "")
+                _clear_cell_force(start_row, image_col)
                 image_anchors.append((start_row, image_col, img_url))
                 if header_map.get("箱唛"):
-                    _set_value_safe(start_row + 1, image_col, "")
-                    _set_value_safe(start_row + 2, image_col, "")
+                    _clear_cell_force(start_row + 1, image_col)
+                    _clear_cell_force(start_row + 2, image_col)
                     image_anchors.append((start_row + 1, image_col, img_url))
                     image_anchors.append((start_row + 2, image_col, img_url))
 
@@ -794,8 +803,8 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
                 continue
             try:
                 ximg = XLImage(img_file)
-                ximg.width = 88
-                ximg.height = 88
+                ximg.width = 800
+                ximg.height = 800
                 ximg.anchor = f"{get_column_letter(ac)}{ar}"
                 ws.add_image(ximg)
             except Exception:
