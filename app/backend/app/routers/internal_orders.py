@@ -624,8 +624,6 @@ def list_internal_orders(limit: int = 50, offset: int = 0, db: Session = Depends
             ext_fields["售价"] = ext_fields.get("unit_price")
         if ext_fields.get("quoted_unit_price") and not ext_fields.get("单价"):
             ext_fields["单价"] = ext_fields.get("quoted_unit_price")
-        if ext_fields.get("单价（元）") and not ext_fields.get("单价"):
-            ext_fields["单价"] = ext_fields.get("单价（元）")
         # 单价由供应商报价回填，内部订单默认不自动填
         if ext_fields.get("单价") in (None, "", "0", 0, "0.0", "0.00"):
             ext_fields["单价"] = ""
@@ -883,7 +881,7 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
                 "产品名_full": product_full,
                 "采购数量": qty,
                 "单价": "",
-                "售价": ext.get("售价") or ext.get("unit_price") or g.get("unit_price") or "",
+                "售价": g.get("unit_price") or ext.get("售价") or ext.get("unit_price") or "",
                 "SKU": g.get("sku") or ext.get("SKU") or ext.get("sku") or "",
                 "单号": ext.get("单号") or o.tracking_no or "",
                 "客户地址": customer_addr,
@@ -970,13 +968,16 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
         for idx, data in enumerate(flat_orders, start=1):
             inc = _inches_number(data.get("英寸"))
             cmn = _cm_number(data.get("厘米"))
-            use_4 = bool(template_start_4 is not None and ((inc is not None and inc <= 36) or (cmn is not None and cmn <= 91.44)))
+            use_4 = bool((inc is not None and inc <= 36) or (cmn is not None and cmn <= 91.44))
             block_size = 4 if use_4 else 3
-            src_start = template_start_4 if use_4 else template_start_3
+            src_start = (template_start_4 if (use_4 and template_start_4 is not None) else template_start_3)
             start_row = current_row
             ws.insert_rows(start_row, amount=block_size)
             for r_off in range(block_size):
+                # 当模板没有4行样式时，第4行复用第3行样式
                 src_r = src_start + r_off
+                if use_4 and template_start_4 is None and r_off == 3:
+                    src_r = src_start + 2
                 dst_r = start_row + r_off
                 ws.row_dimensions[dst_r].height = ws_tpl.row_dimensions[src_r].height
                 for c in range(1, ws.max_column + 1):
@@ -992,10 +993,16 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
             # merges from template block with offset
             for m in ws_tpl.merged_cells.ranges:
                 min_col, min_row, max_col, max_row = m.bounds
-                if min_row >= src_start and max_row <= src_start + block_size - 1:
+                # 标准块复制
+                if min_row >= src_start and max_row <= src_start + min(3 if template_start_4 is None and use_4 else block_size, block_size) - 1:
+                    srow = min_row - src_start + start_row
+                    erow = max_row - src_start + start_row
+                    # 4行回退时，把跨3行的合并扩展到4行（A~Z等公共字段列）
+                    if use_4 and template_start_4 is None and (max_row - min_row + 1) == 3:
+                        erow = srow + 3
                     ws.merge_cells(
-                        start_row=min_row - src_start + start_row,
-                        end_row=max_row - src_start + start_row,
+                        start_row=srow,
+                        end_row=erow,
                         start_column=min_col,
                         end_column=max_col,
                     )

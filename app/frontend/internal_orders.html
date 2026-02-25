@@ -453,6 +453,7 @@
       if (dataKey in order) {
         const val = order[dataKey];
         if (!isEmptyLike(val)) {
+          if (dataKey === "单价" && ["0", "0.0", "0.00", 0].includes(val)) return "";
           if (dataKey === "出单日期") return toYmd(val);
           if (dataKey === "发货日") return toCnDate(val);
           if (dataKey === "送达日") return toCnRange(val);
@@ -468,6 +469,7 @@
       const ext = order.ext || {};
       const v = ext[dataKey];
       if (isEmptyLike(v)) return "";
+      if (dataKey === "单价" && ["0", "0.0", "0.00", 0].includes(v)) return "";
       if (dataKey === "出单日期") return toYmd(v);
       if (dataKey === "发货日") return toCnDate(v);
       if (dataKey === "送达日") return toCnRange(v);
