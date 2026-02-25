@@ -424,6 +424,23 @@ def list_internal_orders(limit: int = 50, offset: int = 0, db: Session = Depends
                 ext_fields["sku"] = order_items[0].sku
             if not ext_fields.get("product_name") and order_items[0].product_name:
                 ext_fields["product_name"] = order_items[0].product_name
+        # 同SKU合并、不同SKU拆分（用于前端展示）
+        grouped_lines = []
+        if order_items:
+            _g = {}
+            for idx_i, it in enumerate(order_items, start=1):
+                k = str(it.sku or "").strip() or f"__NO_SKU__{idx_i}"
+                if k not in _g:
+                    _g[k] = {
+                        "sku": str(it.sku or "").strip(),
+                        "quantity": int(it.quantity or 0),
+                        "product_name": str(it.product_name or "").strip(),
+                        "product_image": str(it.product_image or "").strip(),
+                        "unit_price": it.unit_price,
+                    }
+                else:
+                    _g[k]["quantity"] = int(_g[k].get("quantity") or 0) + int(it.quantity or 0)
+            grouped_lines = list(_g.values())
         if ext_fields.get("latest_ship_date") and not ext_fields.get("amz_ship"):
             ext_fields["amz_ship"] = ext_fields.get("latest_ship_date")
         if (ext_fields.get("earliest_delivery_date") or ext_fields.get("latest_delivery_date")) and not ext_fields.get("amz_deliver"):
@@ -554,6 +571,7 @@ def list_internal_orders(limit: int = 50, offset: int = 0, db: Session = Depends
             "purchase_time": _to_ymd(o.purchase_time),
             "ext": ext_fields,
             "product_image": product_image,
+            "line_groups": grouped_lines,
             "packages": [
                 {
                     "length_cm": p.length_cm,
@@ -628,10 +646,14 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
         delivery = _format_zh_date_range(ext.get("送达日") or ext.get("amz_deliver") or "")
         ship = _format_zh_date(ext.get("发货日") or ext.get("latest_ship_date") or ext.get("amz_ship"))
         for g in grouped.values():
-            product_text = g.get("product_name") or ext.get("产品名") or ext.get("product_name") or ""
+            ext_formatted_name = str(ext.get("产品名") or "").strip()
+            has_formatted_code = bool(re.search(r"\n[A-Z0-9]{4,}-", ext_formatted_name, flags=re.I))
+            product_text = ext_formatted_name if has_formatted_code else (g.get("product_name") or ext.get("product_name") or ext_formatted_name or "")
             pname_zh, pcode = _split_product_name_and_code(product_text)
             if not pcode:
                 pcode = (
+                    _extract_product_code_segment(ext_formatted_name)
+                    or
                     _extract_product_code_segment(ext.get("产品名英文段"))
                     or _extract_product_code_segment(ext.get("箱唛"))
                     or _extract_product_code_segment(ext.get("Customer orderNo"))

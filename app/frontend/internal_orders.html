@@ -695,6 +695,41 @@
       return !!(kw || start || end || hasCol || hasSort);
     }
 
+    function getSelectedOrderIds() {
+      const raw = Array.from(document.querySelectorAll(".order-check:checked"))
+        .map((x) => parseInt(x.value, 10))
+        .filter(Boolean);
+      return Array.from(new Set(raw));
+    }
+
+    function buildDisplayRows(items) {
+      const out = [];
+      (items || []).forEach((o) => {
+        const groups = Array.isArray(o.line_groups) ? o.line_groups : [];
+        if (groups.length <= 1) {
+          out.push(o);
+          return;
+        }
+        groups.forEach((g, idx) => {
+          const ext = { ...(o.ext || {}) };
+          ext["SKU"] = g.sku || ext["SKU"] || "";
+          ext["采购数量"] = g.quantity || ext["采购数量"] || "";
+          const extName = String(ext["产品名"] || "").trim();
+          const hasCode = /\n[A-Z0-9]{4,}-/i.test(extName);
+          if (!hasCode && g.product_name) ext["产品名"] = g.product_name;
+          const row = {
+            ...o,
+            _base_id: o.id,
+            _row_key: `${o.id}_${idx}`,
+            ext,
+            product_image: g.product_image || o.product_image || "",
+          };
+          out.push(row);
+        });
+      });
+      return out;
+    }
+
     function clearAllFilters() {
       document.getElementById("kw").value = "";
       document.getElementById("startDate").value = "";
@@ -758,8 +793,9 @@
         localStorage.removeItem("internalOrderFocusIds");
         focused = items;
       }
-      lastItems = focused.slice();
-      const filtered = applySorting(applyFilters(focused));
+      const displayItems = buildDisplayRows(focused);
+      lastItems = displayItems.slice();
+      const filtered = applySorting(applyFilters(displayItems));
       lastFilteredItems = filtered.slice();
       if (filtered.length === 0 && items.length > 0 && hasAnyActiveFilters()) {
         const tr = document.createElement("tr");
@@ -782,7 +818,8 @@
         const tr = document.createElement("tr");
         const firstCell = document.createElement("td");
         firstCell.dataset.col = "select";
-        firstCell.innerHTML = `<input type="checkbox" class="order-check" value="${o.id}" />`;
+        const baseId = Number(o._base_id || o.id);
+        firstCell.innerHTML = `<input type="checkbox" class="order-check" value="${baseId}" />`;
         tr.appendChild(firstCell);
         allColumns().slice(1).forEach(col => {
           const td = document.createElement("td");
@@ -827,11 +864,11 @@
           tr.appendChild(td);
         });
         const tdOp = document.createElement("td");
-        tdOp.innerHTML = `<button class="btn" onclick="location.href='/ui/internal_order_detail.html?id=${o.id}'">详情</button>
-          <button class="btn" data-del="${o.id}" style="background:#ef4444;">删除</button>`;
+        tdOp.innerHTML = `<button class="btn" onclick="location.href='/ui/internal_order_detail.html?id=${baseId}'">详情</button>
+          <button class="btn" data-del="${baseId}" style="background:#ef4444;">删除</button>`;
         tr.appendChild(tdOp);
         rowsEl.appendChild(tr);
-        attachEditHandlers(tr, o.id);
+        attachEditHandlers(tr, baseId);
         tr.querySelectorAll("[data-del]").forEach(btn => {
           btn.addEventListener("click", async () => {
             if (!confirm("确认删除该订单？")) return;
@@ -912,7 +949,7 @@
     }
 
     exportBtn.addEventListener("click", async () => {
-      const ids = Array.from(document.querySelectorAll(".order-check:checked")).map((x) => parseInt(x.value, 10));
+      const ids = getSelectedOrderIds();
       if (ids.length === 0) {
         alert("请先勾选订单");
         return;
@@ -929,7 +966,7 @@
     });
 
     downloadBtn.addEventListener("click", async () => {
-      const ids = Array.from(document.querySelectorAll(".order-check:checked")).map((x) => parseInt(x.value, 10));
+      const ids = getSelectedOrderIds();
       if (ids.length === 0) {
         alert("请先勾选订单");
         return;
@@ -1137,7 +1174,7 @@
     }
 
     quoteBtn.addEventListener("click", async () => {
-      const ids = Array.from(document.querySelectorAll(".order-check:checked")).map((x) => parseInt(x.value, 10));
+      const ids = getSelectedOrderIds();
       if (ids.length === 0) { alert("请先勾选订单"); return; }
       await openQuoteModal();
       document.getElementById("quoteSubmitBtn").onclick = async () => {
@@ -1207,7 +1244,7 @@
     });
 
     document.getElementById("batchDeleteBtn").addEventListener("click", async () => {
-      const ids = Array.from(document.querySelectorAll(".order-check:checked")).map((x) => parseInt(x.value, 10));
+      const ids = getSelectedOrderIds();
       if (!ids.length) { alert("请先勾选订单"); return; }
       if (!confirm(`确认批量删除 ${ids.length} 条订单？`)) return;
       for (const id of ids) {
@@ -1263,7 +1300,7 @@
     });
 
     document.getElementById("pasteImageBtn").addEventListener("click", async () => {
-      const ids = Array.from(document.querySelectorAll(".order-check:checked")).map((x) => parseInt(x.value, 10));
+      const ids = getSelectedOrderIds();
       if (ids.length === 0) { alert("请先勾选订单"); return; }
       const url = prompt("请输入图片URL（可粘贴 Amazon 缩略图链接）", "");
       if (!url) return;
@@ -1276,14 +1313,14 @@
     });
 
     document.getElementById("uploadImageBtn").addEventListener("click", () => {
-      const ids = Array.from(document.querySelectorAll(".order-check:checked")).map((x) => parseInt(x.value, 10));
+      const ids = getSelectedOrderIds();
       if (ids.length === 0) { alert("请先勾选订单"); return; }
       document.getElementById("uploadImageInput").click();
     });
     document.getElementById("uploadImageInput").addEventListener("change", async (e) => {
       const file = e.target.files && e.target.files[0];
       if (!file) return;
-      const ids = Array.from(document.querySelectorAll(".order-check:checked")).map((x) => parseInt(x.value, 10));
+      const ids = getSelectedOrderIds();
       if (ids.length === 0) { alert("请先勾选订单"); return; }
       const reader = new FileReader();
       reader.onload = async () => {
@@ -1300,7 +1337,7 @@
     });
 
     document.getElementById("backfillBtn").addEventListener("click", async () => {
-      const ids = Array.from(document.querySelectorAll(".order-check:checked")).map((x) => parseInt(x.value, 10));
+      const ids = getSelectedOrderIds();
       if (ids.length === 0) { alert("请先勾选订单"); return; }
       const res = await fetch("/internal-orders/backfill-detail", {
         method: "POST",
@@ -1312,7 +1349,7 @@
       loadOrders();
     });
     document.getElementById("refreshCodeBtn").addEventListener("click", async () => {
-      const ids = Array.from(document.querySelectorAll(".order-check:checked")).map((x) => parseInt(x.value, 10));
+      const ids = getSelectedOrderIds();
       const res = await fetch("/internal-orders/refresh-product-codes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1324,7 +1361,7 @@
     });
 
     document.getElementById("pullDetailBtn").addEventListener("click", async () => {
-      const ids = Array.from(document.querySelectorAll(".order-check:checked")).map((x) => parseInt(x.value, 10));
+      const ids = getSelectedOrderIds();
       const res = await fetch("/internal-orders/pull-order-detail", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1336,7 +1373,7 @@
     });
     document.getElementById("enrichAddrBtn").addEventListener("click", async () => {
       const btn = document.getElementById("enrichAddrBtn");
-      const ids = Array.from(document.querySelectorAll(".order-check:checked")).map((x) => parseInt(x.value, 10));
+      const ids = getSelectedOrderIds();
       if (!ids.length) {
         alert("请先勾选要补全的订单");
         return;
@@ -1374,7 +1411,7 @@
     });
 
     document.getElementById("kapiSignBtn").addEventListener("click", async () => {
-      const ids = Array.from(document.querySelectorAll(".order-check:checked")).map((x) => parseInt(x.value, 10));
+      const ids = getSelectedOrderIds();
       if (!ids.length) {
         alert("请先勾选订单");
         return;
@@ -1565,7 +1602,7 @@
     document.getElementById("statusCanceledBtn").addEventListener("click", () => applyQuickStatus("canceled"));
     document.getElementById("statusClearBtn").addEventListener("click", () => applyQuickStatus(""));
     document.getElementById("refreshPendingBtn").addEventListener("click", async () => {
-      const selected = Array.from(document.querySelectorAll(".order-check:checked")).map((x) => parseInt(x.value, 10)).filter(Boolean);
+      const selected = getSelectedOrderIds().filter(Boolean);
       let ids = selected;
       if (!ids.length) {
         ids = (lastFilteredItems || [])
@@ -1594,7 +1631,7 @@
       loadOrders();
     });
     document.getElementById("dedupeBtn").addEventListener("click", async () => {
-      const selected = Array.from(document.querySelectorAll(".order-check:checked")).map((x) => parseInt(x.value, 10)).filter(Boolean);
+      const selected = getSelectedOrderIds().filter(Boolean);
       const msg = selected.length
         ? `将清理勾选范围内的重复订单，勾选数: ${selected.length}。是否继续？`
         : "将清理全库重复订单（按订单号去重，保留信息更完整的一条）。是否继续？";
