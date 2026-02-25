@@ -16,6 +16,10 @@ from zoneinfo import ZoneInfo
 from app.xlsx_utils import write_xlsx
 from copy import copy
 from openpyxl import load_workbook
+from openpyxl.drawing.image import Image as XLImage
+from openpyxl.utils import get_column_letter
+import tempfile
+import hashlib
 
 router = APIRouter()
 TEMPLATE_HEADERS = [
@@ -146,6 +150,26 @@ def _derive_inches_text(cm_val, product_text: str):
     if inc:
         return f"{int(round(float(inc)))}in"
     return ""
+
+
+def _download_image_to_file(url: str, cache_dir: str):
+    u = str(url or "").strip()
+    if not u or not u.startswith(("http://", "https://")):
+        return ""
+    os.makedirs(cache_dir, exist_ok=True)
+    key = hashlib.md5(u.encode("utf-8")).hexdigest()
+    dst = os.path.join(cache_dir, f"{key}.img")
+    if os.path.exists(dst) and os.path.getsize(dst) > 0:
+        return dst
+    try:
+        resp = requests.get(u, timeout=20)
+        if resp.status_code != 200 or not resp.content:
+            return ""
+        with open(dst, "wb") as f:
+            f.write(resp.content)
+        return dst
+    except Exception:
+        return ""
 
 
 def _build_kapi_url(base_url: str, api_path: str) -> str:
@@ -658,6 +682,7 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
         if ws.max_row >= 2:
             ws.delete_rows(2, ws.max_row - 1)
         # write all blocks with copied style
+        image_anchors = []
         def _merged_anchor(r: int, c: int):
             for mr in ws.merged_cells.ranges:
                 if mr.min_row <= r <= mr.max_row and mr.min_col <= c <= mr.max_col:
@@ -740,14 +765,41 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
             if note_col:
                 _set_value_safe(start_row + 1, note_col, data.get("备注") or "水龙头单独打包")
             if image_col:
-                _set_value_safe(start_row, image_col, data.get("产品图", ""))
+                img_url = data.get("产品图", "")
+                # 不写URL文本，改为真正图片对象（Excel可点击查看/放大）
+                _set_value_safe(start_row, image_col, "")
+                image_anchors.append((start_row, image_col, img_url))
                 if header_map.get("箱唛"):
-                    _set_value_safe(start_row + 1, image_col, data.get("产品图", ""))
-                    _set_value_safe(start_row + 2, image_col, data.get("产品图", ""))
+                    _set_value_safe(start_row + 1, image_col, "")
+                    _set_value_safe(start_row + 2, image_col, "")
+                    image_anchors.append((start_row + 1, image_col, img_url))
+                    image_anchors.append((start_row + 2, image_col, img_url))
 
         # remove trailing empty rows if any
         while ws.max_row > (1 + len(flat_orders) * block_size):
             ws.delete_rows(ws.max_row, 1)
+        # embed image objects
+        cache_dir = os.path.join(tempfile.gettempdir(), "ultimate_erp_img_cache")
+        inserted = set()
+        for r, c, u in image_anchors:
+            if not u:
+                continue
+            ar, ac = _merged_anchor(r, c)
+            pos = (ar, ac, u)
+            if pos in inserted:
+                continue
+            inserted.add(pos)
+            img_file = _download_image_to_file(u, cache_dir)
+            if not img_file:
+                continue
+            try:
+                ximg = XLImage(img_file)
+                ximg.width = 88
+                ximg.height = 88
+                ximg.anchor = f"{get_column_letter(ac)}{ar}"
+                ws.add_image(ximg)
+            except Exception:
+                continue
         out_path = os.path.join("/tmp", f"internal_orders_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.xlsx")
         wb.save(out_path)
         wb.close()
