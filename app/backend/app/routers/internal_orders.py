@@ -890,6 +890,14 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
                 "订单状态": _normalize_order_status(ext.get("订单状态") or o.order_status or ""),
                 "备注": ext.get("备注") or "水龙头单独打包",
             }
+            # 4行块中这些列需要每行独立展示（不合并）
+            for k in [
+                "货代箱规", "计费重量", "花街单价", "头程运费总价", "毛重小于68kg",
+                "长cm", "宽cm", "高cm", "长in\n＜80", "宽in", "高in", "镑重量\n＜150lb",
+                "自算计费重", "oversize 130及165", "周长＜419",
+            ]:
+                if k not in order_row:
+                    order_row[k] = ext.get(k, "")
             flat_orders.append(order_row)
     if not flat_orders:
         raise HTTPException(status_code=404, detail="no rows")
@@ -939,6 +947,11 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
         if ws.max_row >= 2:
             ws.delete_rows(2, ws.max_row - 1)
         # write all blocks with copied style
+        split_cols_for_4row = [
+            "货代箱规", "计费重量", "花街单价", "头程运费总价", "毛重小于68kg",
+            "长cm", "宽cm", "高cm", "长in\n＜80", "长in＜80", "宽in", "高in",
+            "镑重量\n＜150lb", "镑重量＜150lb", "自算计费重", "oversize 130及165", "周长＜419",
+        ]
         image_anchors = []
         def _merged_anchor(r: int, c: int):
             for mr in ws.merged_cells.ranges:
@@ -1030,6 +1043,18 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
             setv("客户地址", data.get("客户地址", ""))
             setv("发货日", data.get("发货日", ""))
             setv("送达日", data.get("送达日", ""))
+            if use_4:
+                # 4行时这些列不合并，按4行重复展示
+                for hn in split_cols_for_4row:
+                    cc = header_map.get(hn)
+                    if not cc:
+                        continue
+                    for mr in list(ws.merged_cells.ranges):
+                        if mr.min_col <= cc <= mr.max_col and mr.min_row >= start_row and mr.max_row <= start_row + 3:
+                            ws.unmerge_cells(str(mr))
+                    v = data.get(hn, "")
+                    for rr in range(start_row, start_row + 4):
+                        ws.cell(rr, cc).value = v
             # split lines
             name_col = header_map.get("产品名")
             marks_col = header_map.get("箱唛")
