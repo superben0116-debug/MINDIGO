@@ -1,9 +1,10 @@
 import os
 
 # Configuration placeholders. Replace with real values or load from ENV.
-LINGXING_APP_ID = os.getenv("LINGXING_APP_ID", "APP_ID")
-LINGXING_ACCESS_TOKEN = os.getenv("LINGXING_ACCESS_TOKEN", "ACCESS_TOKEN")
-LINGXING_SID_LIST = os.getenv("LINGXING_SID_LIST", "SID1").split(",")
+LINGXING_APP_ID = os.getenv("LINGXING_APP_ID", "")
+LINGXING_APP_SECRET = os.getenv("LINGXING_APP_SECRET", "")
+LINGXING_ACCESS_TOKEN = os.getenv("LINGXING_ACCESS_TOKEN", "")
+LINGXING_SID_LIST = [x.strip() for x in os.getenv("LINGXING_SID_LIST", "").split(",") if x.strip()]
 
 # Shipper config for KAPI export
 SHIPPER = {

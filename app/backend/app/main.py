@@ -31,6 +31,20 @@ def _is_truthy(v: str | None) -> bool:
     return str(v or "").strip().lower() in ("1", "true", "yes", "on")
 
 
+def _looks_placeholder(v: str | None) -> bool:
+    s = str(v or "").strip().lower()
+    return s in ("", "app_id", "access_token", "sid1")
+
+
+def _config_ready_for_sync(cfg: dict) -> bool:
+    app_id = str(cfg.get("app_id") or "").strip()
+    app_secret = str(cfg.get("app_secret") or "").strip()
+    sid_list = str(cfg.get("sid_list") or "").strip()
+    if _looks_placeholder(app_id) or _looks_placeholder(app_secret):
+        return False
+    return bool(app_id and app_secret and sid_list)
+
+
 def _auto_sync_loop():
     interval_min = int(os.getenv("ERP_AUTO_SYNC_INTERVAL_MINUTES", "30") or "30")
     if interval_min < 5:
@@ -40,10 +54,7 @@ def _auto_sync_loop():
         try:
             cfg = crud.get_config(db, "lingxing")
             lxcfg = cfg.config_value if cfg and isinstance(cfg.config_value, dict) else {}
-            app_id = str(lxcfg.get("app_id") or "").strip()
-            app_secret = str(lxcfg.get("app_secret") or "").strip()
-            sid_list = str(lxcfg.get("sid_list") or "").strip()
-            if app_id and app_secret and sid_list:
+            if _config_ready_for_sync(lxcfg):
                 running = (
                     db.query(models.ImportJob.id)
                     .filter(
@@ -130,8 +141,22 @@ def startup():
     db = SessionLocal()
     try:
         ensure_default_admin(db)
-        if not crud.get_config(db, "lingxing"):
-            crud.set_config(db, "lingxing", default_lingxing_config())
+        existing_lx = crud.get_config(db, "lingxing")
+        lx_defaults = default_lingxing_config()
+        if not existing_lx:
+            crud.set_config(db, "lingxing", lx_defaults)
+        else:
+            cur = existing_lx.config_value if isinstance(existing_lx.config_value, dict) else {}
+            # Auto bootstrap from ENV when current value is empty/placeholder.
+            changed = False
+            for k in ("app_id", "app_secret", "access_token", "sid_list"):
+                cv = str(cur.get(k) or "").strip()
+                dv = str(lx_defaults.get(k) or "").strip()
+                if (_looks_placeholder(cv) or not cv) and dv and not _looks_placeholder(dv):
+                    cur[k] = dv
+                    changed = True
+            if changed:
+                crud.set_config(db, "lingxing", cur)
         if not crud.get_config(db, "shipper"):
             crud.set_config(db, "shipper", default_shipper_config())
         if not crud.get_config(db, "kapi"):

@@ -21,6 +21,39 @@ def get_db():
         db.close()
 
 
+@router.get("/sync-status")
+def sync_status(db: Session = Depends(get_db)):
+    cfg = get_lingxing_config(db)
+    app_id = str(cfg.get("app_id") or "").strip()
+    app_secret = str(cfg.get("app_secret") or "").strip()
+    sid_list = str(cfg.get("sid_list") or "").strip()
+    placeholder = {"", "APP_ID", "ACCESS_TOKEN", "SID1", "app_id", "access_token", "sid1"}
+    ready = bool(app_id and app_secret and sid_list and app_id not in placeholder and app_secret not in placeholder)
+    latest = (
+        db.query(models.ImportJob)
+        .filter(models.ImportJob.source == "lingxing_fbm")
+        .order_by(models.ImportJob.id.desc())
+        .first()
+    )
+    return {
+        "ready": ready,
+        "config": {
+            "app_id_set": bool(app_id and app_id not in placeholder),
+            "app_secret_set": bool(app_secret and app_secret not in placeholder),
+            "sid_list": sid_list,
+        },
+        "latest_job": {
+            "id": latest.id if latest else None,
+            "status": latest.status if latest else None,
+            "success": latest.success_count if latest else 0,
+            "failed": latest.failed_count if latest else 0,
+            "error_summary": latest.error_summary if latest else "",
+            "start_time": latest.start_time if latest else None,
+            "end_time": latest.end_time if latest else None,
+        },
+    }
+
+
 @router.post("/sync-fbm-orders")
 def sync_orders(db: Session = Depends(get_db)):
     job = crud.create_import_job(db, "lingxing_fbm")

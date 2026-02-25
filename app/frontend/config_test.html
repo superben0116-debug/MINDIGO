@@ -222,6 +222,8 @@
         });
         const out3 = await safeJson(res3);
         out.textContent = JSON.stringify({ lingxing: out1, shipper: out2, kapi: out3 }, null, 2);
+        // Save complete -> trigger one sync immediately
+        try { await fetch("/integrations/lingxing/sync-fbm-orders", { method: "POST" }); } catch (_) {}
         alert("配置已保存");
       } catch (e) {
         alert("保存失败: " + e.message);

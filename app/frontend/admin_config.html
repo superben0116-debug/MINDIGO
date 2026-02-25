@@ -170,6 +170,7 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(kapi),
       });
+      try { await fetch("/integrations/lingxing/sync-fbm-orders", { method: "POST" }); } catch (_) {}
 
       alert("配置已保存");
     }
