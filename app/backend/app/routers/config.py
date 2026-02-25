@@ -5,6 +5,7 @@ from app.db import SessionLocal
 from app import crud
 from app.address_mapping import default_address_mapping
 from app.interface_registry import default_interface_registry
+from app.config_store import default_kapi_config, default_lingxing_config, default_shipper_config
 
 router = APIRouter()
 
@@ -26,9 +27,9 @@ def get_all_config(db: Session = Depends(get_db)):
     interfaces = crud.get_config(db, "interface_registry")
     return {
         "address_mapping": addr.config_value if addr else default_address_mapping(),
-        "shipper": shipper.config_value if shipper else {},
-        "lingxing": lingxing.config_value if lingxing else {},
-        "kapi": kapi.config_value if kapi else {},
+        "shipper": shipper.config_value if shipper else default_shipper_config(),
+        "lingxing": lingxing.config_value if lingxing else default_lingxing_config(),
+        "kapi": kapi.config_value if kapi else default_kapi_config(),
         "interface_registry": interfaces.config_value if interfaces else default_interface_registry(),
     }
 
@@ -36,13 +37,13 @@ def get_all_config(db: Session = Depends(get_db)):
 @router.get("/lingxing")
 def get_lingxing_config(db: Session = Depends(get_db)):
     cfg = crud.get_config(db, "lingxing")
-    return cfg.config_value if cfg else {}
+    return cfg.config_value if cfg else default_lingxing_config()
 
 
 @router.get("/shipper")
 def get_shipper_config(db: Session = Depends(get_db)):
     cfg = crud.get_config(db, "shipper")
-    return cfg.config_value if cfg else {}
+    return cfg.config_value if cfg else default_shipper_config()
 
 
 @router.put("/address-mapping")
@@ -66,7 +67,7 @@ def set_lingxing(payload: dict, db: Session = Depends(get_db)):
 @router.get("/kapi")
 def get_kapi_config(db: Session = Depends(get_db)):
     cfg = crud.get_config(db, "kapi")
-    return cfg.config_value if cfg else {}
+    return cfg.config_value if cfg else default_kapi_config()
 
 
 @router.put("/kapi")

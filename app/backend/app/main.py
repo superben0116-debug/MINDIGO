@@ -12,6 +12,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from app.auth import get_current_user_optional, ensure_default_admin
 from app.services import execute_sync_job
 from app.interface_registry import default_interface_registry
+from app.config_store import default_kapi_config, default_lingxing_config, default_shipper_config
 from app.routers.internal_orders import router as internal_orders_router
 from app.routers.supplier_quotes import router as supplier_quotes_router
 from app.routers.kapi_exports import router as kapi_exports_router
@@ -129,6 +130,12 @@ def startup():
     db = SessionLocal()
     try:
         ensure_default_admin(db)
+        if not crud.get_config(db, "lingxing"):
+            crud.set_config(db, "lingxing", default_lingxing_config())
+        if not crud.get_config(db, "shipper"):
+            crud.set_config(db, "shipper", default_shipper_config())
+        if not crud.get_config(db, "kapi"):
+            crud.set_config(db, "kapi", default_kapi_config())
         if not crud.get_config(db, "interface_registry"):
             crud.set_config(db, "interface_registry", default_interface_registry())
     finally:
