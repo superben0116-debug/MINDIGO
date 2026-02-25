@@ -1,5 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+import socket
+import requests
 from app.db import SessionLocal
 from app.services import execute_sync_job
 from app import crud, models
@@ -52,6 +54,28 @@ def sync_status(db: Session = Depends(get_db)):
             "end_time": latest.end_time if latest else None,
         },
     }
+
+
+@router.get("/network-test")
+def lingxing_network_test():
+    host = "openapi.lingxing.com"
+    out = {"host": host}
+    try:
+        ip = socket.gethostbyname(host)
+        out["dns_ok"] = True
+        out["resolved_ip"] = ip
+    except Exception as e:
+        out["dns_ok"] = False
+        out["dns_error"] = str(e)
+        return out
+    try:
+        r = requests.get(f"https://{host}/", timeout=10)
+        out["https_ok"] = True
+        out["https_status"] = r.status_code
+    except Exception as e:
+        out["https_ok"] = False
+        out["https_error"] = str(e)
+    return out
 
 
 @router.post("/sync-fbm-orders")
