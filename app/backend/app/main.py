@@ -102,3 +102,8 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/")
+def root():
+    return RedirectResponse(url="/ui/index.html", status_code=307)
