@@ -608,6 +608,21 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
         if ws.max_row >= 2:
             ws.delete_rows(2, ws.max_row - 1)
         # write all blocks with copied style
+        def _merged_anchor(r: int, c: int):
+            for mr in ws.merged_cells.ranges:
+                if mr.min_row <= r <= mr.max_row and mr.min_col <= c <= mr.max_col:
+                    return mr.min_row, mr.min_col
+            return r, c
+
+        def _set_value_safe(r: int, c: int, value: Any):
+            ar, ac = _merged_anchor(r, c)
+            cell = ws.cell(ar, ac)
+            if cell.value in (None, ""):
+                cell.value = value
+            else:
+                if value not in (None, "") and str(value) not in str(cell.value):
+                    cell.value = f"{cell.value}\n{value}"
+
         for idx, data in enumerate(flat_orders, start=1):
             start_row = 2 + (idx - 1) * block_size
             # insert 3 rows
@@ -644,7 +659,7 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
             def setv(name, value, row=start_row):
                 c = header_map.get(name)
                 if c:
-                    ws.cell(row, c).value = value
+                    _set_value_safe(row, c, value)
 
             setv("序列", idx)
             setv("出单日期", data.get("出单日期", ""))
@@ -673,19 +688,19 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
             code = data.get("产品名_code", "")
             cm = data.get("厘米", "")
             if name_col:
-                ws.cell(start_row, name_col).value = f"{cm}米柜体" if cm else "柜体"
-                ws.cell(start_row + 1, name_col).value = "LED智能镜柜"
-                ws.cell(start_row + 2, name_col).value = "水槽"
+                _set_value_safe(start_row, name_col, f"{cm}米柜体" if cm else "柜体")
+                _set_value_safe(start_row + 1, name_col, "LED智能镜柜")
+                _set_value_safe(start_row + 2, name_col, "水槽")
             if marks_col:
-                ws.cell(start_row, marks_col).value = code
-                ws.cell(start_row + 1, marks_col).value = code
-                ws.cell(start_row + 2, marks_col).value = f"{code} SLT".strip()
+                _set_value_safe(start_row, marks_col, code)
+                _set_value_safe(start_row + 1, marks_col, code)
+                _set_value_safe(start_row + 2, marks_col, f"{code} SLT".strip())
             if note_col:
-                ws.cell(start_row + 1, note_col).value = data.get("备注") or "水龙头单独打包"
+                _set_value_safe(start_row + 1, note_col, data.get("备注") or "水龙头单独打包")
             if image_col:
-                ws.cell(start_row, image_col).value = data.get("产品图", "")
-                ws.cell(start_row + 1, image_col).value = data.get("产品图", "")
-                ws.cell(start_row + 2, image_col).value = data.get("产品图", "")
+                _set_value_safe(start_row, image_col, data.get("产品图", ""))
+                _set_value_safe(start_row + 1, image_col, data.get("产品图", ""))
+                _set_value_safe(start_row + 2, image_col, data.get("产品图", ""))
 
         # remove trailing empty rows if any
         while ws.max_row > (1 + len(flat_orders) * block_size):
