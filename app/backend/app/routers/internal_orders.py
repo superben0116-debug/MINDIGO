@@ -531,7 +531,7 @@ def _extract_kapi_order_no(fields: dict) -> str:
 def list_internal_orders(limit: int = 50, offset: int = 0, db: Session = Depends(get_db)):
     orders = crud.list_internal_orders(db, limit=limit, offset=offset)
     items = []
-    cfg = get_lingxing_config()
+    cfg = get_lingxing_config(db)
     app_id = str(cfg.get("app_id") or cfg.get("APP_ID") or "").strip()
     app_secret = str(cfg.get("app_secret") or cfg.get("APP_SECRET") or "").strip()
     _mws_token = None
@@ -760,7 +760,7 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
         os.path.join(project_root, "app", "docs", "inputs", "internal_orders.xlsx"),
     ]
     template_path = next((p for p in template_candidates if os.path.exists(p)), template_candidates[1])
-    cfg = get_lingxing_config()
+    cfg = get_lingxing_config(db)
     app_id = str(cfg.get("app_id") or cfg.get("APP_ID") or "").strip()
     app_secret = str(cfg.get("app_secret") or cfg.get("APP_SECRET") or "").strip()
     _mws_token = None
