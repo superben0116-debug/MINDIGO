@@ -101,6 +101,10 @@ def _format_customer_address_block(fields: dict) -> str:
     postal = _clean_text(fields.get("postal_code") or fields.get("customer_zip"))
     country = _country_text_zh(fields.get("receiver_country_code") or fields.get("country_code"))
     addr_type = _address_type_zh(fields.get("address_type"))
+    if not addr_type:
+        addr_type = _address_type_zh(fields.get("address_type_name"))
+    if not addr_type:
+        addr_type = "住宅"
     buyer = _clean_text(fields.get("buyer_name"))
     phone = _clean_text(fields.get("电话") or fields.get("receiver_mobile") or fields.get("receiver_tel"))
 
@@ -784,6 +788,10 @@ def list_internal_orders(limit: int = 50, offset: int = 0, db: Session = Depends
         if not ext_fields.get("区域"):
             zip_code = ext_fields.get("postal_code") or ext_fields.get("customer_zip")
             region = _zip_to_region(zip_code)
+            if not region:
+                cc = str(ext_fields.get("receiver_country_code") or ext_fields.get("country_code") or "").upper()
+                if cc and cc != "US":
+                    region = _country_text_zh(cc)
             if region:
                 ext_fields["区域"] = region
         persist_ext = {}
@@ -966,7 +974,7 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
                 "序列": "",
                 "出单日期": _to_ymd(ext.get("出单日期") or o.purchase_time),
                 "产品图": img,
-                "厘米": cm,
+                "厘米": "",
                 "英寸": inches_text,
                 "区域": region,
                 "工厂内部型号": ext.get("工厂内部型号") or ext.get("internal_factory_no") or "",
@@ -1207,7 +1215,7 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
             setv("序列", idx)
             setv("出单日期", data.get("出单日期", ""))
             setv("产品图", data.get("产品图", ""))
-            setv("厘米", data.get("厘米", ""))
+            setv("厘米", "")
             setv("英寸", data.get("英寸", ""))
             setv("区域", data.get("区域", ""))
             setv("工厂内部型号", data.get("工厂内部型号", ""))
