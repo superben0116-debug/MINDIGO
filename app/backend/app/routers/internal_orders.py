@@ -18,6 +18,7 @@ from copy import copy
 from openpyxl import load_workbook
 from openpyxl.drawing.image import Image as XLImage
 from openpyxl.utils import get_column_letter
+from openpyxl.formula.translate import Translator
 import tempfile
 import hashlib
 
@@ -804,6 +805,7 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
     flat_orders = []
     project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
     template_candidates = [
+        "/Users/baicai/Downloads/26年1-6月亚马逊家具订单表测试.xlsx",
         "/Users/baicai/Downloads/internal_orders.xlsx",
         os.path.join(project_root, "docs", "inputs", "internal_orders.xlsx"),
         os.path.join(project_root, "app", "docs", "inputs", "internal_orders.xlsx"),
@@ -1012,6 +1014,17 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
             if template_start_4 is not None
             else None
         )
+        def _detect_formula_cols(start_row: int, block_size: int):
+            cols = set()
+            end_row = start_row + block_size - 1
+            for rr in range(start_row, end_row + 1):
+                for cc in range(1, ws_tpl.max_column + 1):
+                    vv = ws_tpl.cell(rr, cc).value
+                    if isinstance(vv, str) and vv.startswith("="):
+                        cols.add(cc)
+            return cols
+        formula_cols_3 = _detect_formula_cols(template_start_3, 3)
+        formula_cols_4 = _detect_formula_cols(template_start_4, 4) if template_start_4 is not None else set()
         image_anchors = []
         def _merged_anchor(r: int, c: int):
             for mr in ws.merged_cells.ranges:
@@ -1020,12 +1033,16 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
             return r, c
 
         def _set_value_safe(r: int, c: int, value: Any):
+            if value in (None, ""):
+                return
             ar, ac = _merged_anchor(r, c)
             cell = ws.cell(ar, ac)
-            if cell.value in (None, ""):
+            if isinstance(cell.value, str) and cell.value.startswith("="):
+                cell.value = value
+            elif cell.value in (None, ""):
                 cell.value = value
             else:
-                if value not in (None, "") and str(value) not in str(cell.value):
+                if str(value) not in str(cell.value):
                     cell.value = f"{cell.value}\n{value}"
 
         def _clear_cell_force(r: int, c: int):
@@ -1063,14 +1080,26 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
                     dst.border = copy(src.border)
                     dst.alignment = copy(src.alignment)
                     dst.protection = copy(src.protection)
+                    # 带公式的模板必须保留并按目标行平移引用
+                    v = src.value
+                    if isinstance(v, str) and v.startswith("="):
+                        try:
+                            dst.value = Translator(v, origin=src.coordinate).translate_formula(dst.coordinate)
+                        except Exception:
+                            dst.value = v
+                    else:
+                        dst.value = v
             # apply strict per-column merge rules from template
             if use_4 and merge_spans_4:
                 col_spans = merge_spans_4
+                formula_cols = formula_cols_4
             elif use_4 and not merge_spans_4:
                 # fallback: extend 3-row rule to 4-row when no 4-row sample exists
                 col_spans = {c: (4 if s == 3 else s) for c, s in merge_spans_3.items()}
+                formula_cols = formula_cols_3
             else:
                 col_spans = merge_spans_3
+                formula_cols = formula_cols_3
             for c in range(1, ws.max_column + 1):
                 span = int(col_spans.get(c, 1) or 1)
                 if span > 1:
@@ -1084,6 +1113,8 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
             def setv(name, value, row=start_row):
                 c = header_map.get(name)
                 if c:
+                    if c in formula_cols and value in (None, ""):
+                        return
                     _set_value_safe(row, c, value)
 
             setv("序列", idx)
