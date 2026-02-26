@@ -1071,8 +1071,21 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
                     if isinstance(vv, str) and vv.startswith("="):
                         cols.add(cc)
             return cols
+        def _detect_formula_map(start_row: int, block_size: int):
+            # key: (row_offset, col) -> template formula text
+            fm = {}
+            end_row = start_row + block_size - 1
+            for rr in range(start_row, end_row + 1):
+                off = rr - start_row
+                for cc in range(1, ws_tpl.max_column + 1):
+                    vv = ws_tpl.cell(rr, cc).value
+                    if isinstance(vv, str) and vv.startswith("="):
+                        fm[(off, cc)] = vv
+            return fm
         formula_cols_3 = _detect_formula_cols(template_start_3, 3)
         formula_cols_4 = _detect_formula_cols(template_start_4, 4) if template_start_4 is not None else set()
+        formula_map_3 = _detect_formula_map(template_start_3, 3)
+        formula_map_4 = _detect_formula_map(template_start_4, 4) if template_start_4 is not None else {}
         image_anchors = []
         def _merged_anchor(r: int, c: int):
             for mr in ws.merged_cells.ranges:
@@ -1179,7 +1192,8 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
             def setv(name, value, row=start_row):
                 c = header_map.get(name)
                 if c:
-                    if c in formula_cols and value in (None, ""):
+                    # 公式列不直接写值，保留模板公式
+                    if c in formula_cols:
                         return
                     _set_value_safe(row, c, value)
 
@@ -1206,12 +1220,26 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
                 for cc in range(1, ws.max_column + 1):
                     if int(col_spans.get(cc, 1) or 1) != 1:
                         continue
+                    if cc in formula_cols:
+                        continue
                     hname = str(ws.cell(1, cc).value or "").strip()
                     v = data.get(hname, "")
                     if v in (None, ""):
                         continue
                     for rr in range(start_row, start_row + 4):
                         ws.cell(rr, cc).value = v
+            # 强制回填公式（防止中间写值覆盖）
+            fmap = formula_map_4 if use_4 else formula_map_3
+            fsrc = template_start_4 if (use_4 and template_start_4 is not None) else template_start_3
+            for (off, cc), f in fmap.items():
+                if off >= block_size:
+                    continue
+                rr = start_row + off
+                src_rr = fsrc + off
+                try:
+                    ws.cell(rr, cc).value = Translator(f, origin=f"{get_column_letter(cc)}{src_rr}").translate_formula(f"{get_column_letter(cc)}{rr}")
+                except Exception:
+                    ws.cell(rr, cc).value = f
             # split lines
             name_col = header_map.get("产品名")
             marks_col = header_map.get("箱唛")
