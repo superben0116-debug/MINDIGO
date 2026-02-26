@@ -17,7 +17,7 @@ from app.xlsx_utils import write_xlsx
 from copy import copy
 from openpyxl import load_workbook
 from openpyxl.drawing.image import Image as XLImage
-from openpyxl.utils import get_column_letter
+from openpyxl.utils import get_column_letter, column_index_from_string
 from openpyxl.formula.translate import Translator
 import tempfile
 import hashlib
@@ -973,6 +973,10 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
     else:
         wb = load_workbook(template_path)
         ws = wb.active
+        # BU列以后不输出任何内容与线框
+        max_keep_col = column_index_from_string("BT")
+        if ws.max_column > max_keep_col:
+            ws.delete_cols(max_keep_col + 1, ws.max_column - max_keep_col)
         # map header index
         header_map = {}
         for c in range(1, ws.max_column + 1):
@@ -1088,7 +1092,8 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
                         except Exception:
                             dst.value = v
                     else:
-                        dst.value = v
+                        # 不复制模板静态值，避免把模板示例数据导出到新文件
+                        dst.value = None
             # apply strict per-column merge rules from template
             if use_4 and merge_spans_4:
                 col_spans = merge_spans_4
@@ -1100,6 +1105,23 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
             else:
                 col_spans = merge_spans_3
                 formula_cols = formula_cols_3
+            # 4行强制规则（用户指定）
+            if use_4:
+                for cc in range(column_index_from_string("T"), column_index_from_string("X") + 1):
+                    col_spans[cc] = 3
+                for cc in range(column_index_from_string("Z"), column_index_from_string("AC") + 1):
+                    col_spans[cc] = 3
+                for cc in range(column_index_from_string("AD"), column_index_from_string("AG") + 1):
+                    col_spans[cc] = 1
+                col_spans[column_index_from_string("AL")] = 3
+                for cc in range(column_index_from_string("AM"), column_index_from_string("AU") + 1):
+                    col_spans[cc] = 1
+                for cc in range(column_index_from_string("AW"), column_index_from_string("AX") + 1):
+                    col_spans[cc] = 3
+                for cc in range(column_index_from_string("BN"), column_index_from_string("BO") + 1):
+                    col_spans[cc] = 1
+                col_spans[column_index_from_string("BR")] = 3
+                col_spans[column_index_from_string("BT")] = 3
             for c in range(1, ws.max_column + 1):
                 span = int(col_spans.get(c, 1) or 1)
                 if span > 1:
