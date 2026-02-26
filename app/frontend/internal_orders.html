@@ -701,9 +701,28 @@
     function applySorting(items) {
       if (!activeSort) return items;
       const { key, dir } = activeSort;
+      const col = allColumns().find(c => c.key === key);
+      const type = col ? (columnTypes[col.label] || "text") : "text";
+      function asYmd(v) {
+        const s = String(v || "").trim();
+        if (!s) return "";
+        if (s.length >= 10 && s[4] === "-" && s[7] === "-") return s.slice(0, 10);
+        const m1 = s.match(/(20\d{2})\/(\d{1,2})\/(\d{1,2})/);
+        if (m1) return `${m1[1]}-${String(Number(m1[2])).padStart(2, "0")}-${String(Number(m1[3])).padStart(2, "0")}`;
+        const m2 = s.match(/(20\d{2})年(\d{1,2})月(\d{1,2})日/);
+        if (m2) return `${m2[1]}-${String(Number(m2[2])).padStart(2, "0")}-${String(Number(m2[3])).padStart(2, "0")}`;
+        return "";
+      }
       return items.slice().sort((a, b) => {
         const av = getValue(a, { key });
         const bv = getValue(b, { key });
+        if (type === "date") {
+          const da = asYmd(av);
+          const db = asYmd(bv);
+          if (da === db) return 0;
+          if (dir === "asc") return String(da).localeCompare(String(db), "zh");
+          return String(db).localeCompare(String(da), "zh");
+        }
         if (av === bv) return 0;
         if (dir === "asc") return String(av).localeCompare(String(bv), "zh");
         return String(bv).localeCompare(String(av), "zh");
