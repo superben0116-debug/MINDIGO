@@ -105,6 +105,7 @@
             <button class="chip" id="statusShippedBtn">已发货</button>
             <button class="chip" id="statusCanceledBtn">已取消</button>
             <button class="chip" id="statusClearBtn">清除状态</button>
+            <button class="btn" id="refreshAllBtn" style="background:#2563eb;">一键更新订单和状态</button>
             <button class="btn" id="refreshPendingBtn">刷新待审核</button>
             <button class="btn" id="dedupeBtn" style="background:#0f766e;">清理重复订单</button>
           </div>
@@ -620,8 +621,9 @@
         const ext = o.ext || {};
         const target = `${ext["内部订单号"] || o.internal_order_no || ""} ${ext["订单编号"] || o.platform_order_no || ""} ${ext["店铺"] || o.shop_name || ""} ${ext["产品名"] || ext["product_name"] || ""}`.toLowerCase();
         if (kw && !target.includes(kw)) return false;
-        if (start && (o.purchase_time || "").slice(0,10) < start) return false;
-        if (end && (o.purchase_time || "").slice(0,10) > end) return false;
+        const purchaseYmd = extractYmd(getValue(o, { key: "出单日期", dataKey: "出单日期" }) || o.purchase_time || "");
+        if (start && purchaseYmd && purchaseYmd < start) return false;
+        if (end && purchaseYmd && purchaseYmd > end) return false;
         for (const [key, f] of Object.entries(colFilters)) {
           const val = String(getValue(o, { key }) || "");
           if (f.type === "text" && f.value) {
@@ -1127,9 +1129,22 @@
       document.getElementById("quoteModal").style.display = "none";
     });
 
+    function getPstTodayYmd() {
+      const parts = new Intl.DateTimeFormat("en-US", {
+        timeZone: "America/Los_Angeles",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).formatToParts(new Date());
+      const y = parts.find(p => p.type === "year")?.value || "";
+      const m = parts.find(p => p.type === "month")?.value || "";
+      const d = parts.find(p => p.type === "day")?.value || "";
+      return `${y}-${m}-${d}`;
+    }
+
     todayChip.addEventListener("click", () => {
       todayChip.classList.toggle("active");
-      const today = new Date().toISOString().slice(0, 10);
+      const today = getPstTodayYmd();
       if (todayChip.classList.contains("active")) {
         document.getElementById("startDate").value = today;
         document.getElementById("endDate").value = today;
@@ -1139,6 +1154,33 @@
       }
       loadOrders();
     });
+
+    async function triggerFullSyncAndRefresh() {
+      const start = await fetch("/integrations/lingxing/sync-fbm-orders", { method: "POST" });
+      const j = await start.json().catch(() => ({}));
+      if (!start.ok) {
+        alert(`启动同步失败: ${j.detail || start.status}`);
+        return;
+      }
+      const startedAt = Date.now();
+      let done = false;
+      while (!done && (Date.now() - startedAt) < 3 * 60 * 1000) {
+        await new Promise(r => setTimeout(r, 3000));
+        const stRes = await fetch("/integrations/lingxing/sync-status");
+        const st = await stRes.json().catch(() => ({}));
+        const s = String(st?.latest_job?.status || "").toLowerCase();
+        if (s === "done" || s === "failed") done = true;
+      }
+      try {
+        await fetch("/internal-orders/refresh-pending-status", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ only_pending: false }),
+        });
+      } catch (_) {}
+      await loadOrders();
+      alert("更新完成（订单与状态已刷新）");
+    }
 
     async function openQuoteModal() {
       let list = JSON.parse(localStorage.getItem("suppliers") || "[]");
@@ -1608,6 +1650,9 @@
     document.getElementById("statusShippedBtn").addEventListener("click", () => applyQuickStatus("shipped"));
     document.getElementById("statusCanceledBtn").addEventListener("click", () => applyQuickStatus("canceled"));
     document.getElementById("statusClearBtn").addEventListener("click", () => applyQuickStatus(""));
+    document.getElementById("refreshAllBtn").addEventListener("click", async () => {
+      await triggerFullSyncAndRefresh();
+    });
     document.getElementById("refreshPendingBtn").addEventListener("click", async () => {
       const selected = getSelectedOrderIds().filter(Boolean);
       let ids = selected;
