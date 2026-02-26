@@ -414,8 +414,42 @@
       function toYmd(v) {
         const s = String(v || "").trim();
         if (!s) return "";
-        if (s.length >= 10 && s[4] === "-" && s[7] === "-") return s.slice(0, 10);
+        const m = s.match(/(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+        if (m) return `${Number(m[1])}/${Number(m[2])}/${Number(m[3])}`;
         return s;
+      }
+      function countryZh(v) {
+        const code = String(v || "").trim().toUpperCase();
+        if (code === "US") return "美国";
+        if (code === "CA") return "加拿大";
+        if (code === "CN") return "中国";
+        return code;
+      }
+      function addressTypeZh(v) {
+        const s = String(v || "").trim();
+        if (!s) return "";
+        if (["1", "住宅", "Residential", "residential"].includes(s)) return "住宅";
+        if (["2", "商业地址", "商业", "Business", "business"].includes(s)) return "商业地址";
+        return s;
+      }
+      function buildAddress(base, ext) {
+        const lines = String(base || "").split("\n").map(x => String(x || "").trim()).filter(Boolean);
+        const hasCountry = lines.some(x => ["美国", "加拿大", "中国"].includes(x));
+        const c = countryZh(ext.receiver_country_code || ext.country_code);
+        if (c && !hasCountry) lines.push(c);
+        if (!lines.some(x => x.includes("地址类型:"))) {
+          const t = addressTypeZh(ext.address_type);
+          if (t) lines.push(`地址类型:  ${t}`);
+        }
+        if (!lines.some(x => x.startsWith("联系买家:"))) {
+          const b = String(ext.buyer_name || "").trim();
+          if (b) lines.push(`联系买家: ${b}`);
+        }
+        if (!lines.some(x => x.startsWith("电话:"))) {
+          const p = String(ext["电话"] || ext.receiver_mobile || ext.receiver_tel || "").trim();
+          if (p) lines.push(`电话: ${p}`);
+        }
+        return lines.join("\n");
       }
       function parseDate(v) {
         const s = String(v || "").trim().replace("T", " ");
@@ -458,6 +492,7 @@
           if (dataKey === "出单日期") return toYmd(val);
           if (dataKey === "发货日") return toCnDate(val);
           if (dataKey === "送达日") return toCnRange(val);
+          if (dataKey === "客户地址") return buildAddress(val, order.ext || {});
           return dataKey === "店铺" ? mapShop(val) : val;
         }
       }
@@ -470,6 +505,7 @@
       const ext = order.ext || {};
       const v = ext[dataKey];
       if (dataKey === "单价") return "";
+      if (dataKey === "客户地址") return buildAddress(v, ext);
       if (isEmptyLike(v)) return "";
       if (dataKey === "出单日期") return toYmd(v);
       if (dataKey === "发货日") return toCnDate(v);
@@ -610,6 +646,8 @@
         const s = String(v || "").trim();
         if (!s) return "";
         if (s.length >= 10 && s[4] === "-" && s[7] === "-") return s.slice(0, 10);
+        const m1 = s.match(/(20\d{2})\/(\d{1,2})\/(\d{1,2})/);
+        if (m1) return `${m1[1]}-${String(Number(m1[2])).padStart(2, "0")}-${String(Number(m1[3])).padStart(2, "0")}`;
         const m = s.match(/(20\d{2})年(\d{1,2})月(\d{1,2})日/);
         if (!m) return "";
         return `${m[1]}-${String(Number(m[2])).padStart(2, "0")}-${String(Number(m[3])).padStart(2, "0")}`;
@@ -646,6 +684,15 @@
               if (!f.values.includes(val)) return false;
             }
           }
+        }
+        // 兜底：快捷状态按钮与列筛选联动时，强制互斥待审核/未发货
+        if (quickStatus === "unshipped") {
+          const s = String(getValue(o, { key: "订单状态", dataKey: "订单状态" }) || "").trim().toLowerCase();
+          if (s === "待审核" || s === "pending") return false;
+        }
+        if (quickStatus === "pending") {
+          const s = String(getValue(o, { key: "订单状态", dataKey: "订单状态" }) || "").trim().toLowerCase();
+          if (!(s === "待审核" || s === "pending")) return false;
         }
         return true;
       });
@@ -770,7 +817,8 @@
       if (!quickStatus) {
         delete colFilters[key];
       } else if (quickStatus === "unshipped") {
-        colFilters[key] = { type: "status", values: ["待发货", "待审核", "未发货", "待付款", "同步中", "已同步"] };
+        // 未发货不包含待审核，避免与“待审核”快捷状态重叠
+        colFilters[key] = { type: "status", values: ["待发货", "未发货", "待付款", "同步中", "已同步"] };
       } else if (quickStatus === "shipped") {
         colFilters[key] = { type: "status", values: ["已发货", "平台发货", "部分发货", "fulfilled"] };
       } else if (quickStatus === "pending") {

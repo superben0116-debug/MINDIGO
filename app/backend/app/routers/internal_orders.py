@@ -52,13 +52,44 @@ def _to_ymd(v):
     if v is None:
         return ""
     if isinstance(v, datetime):
-        return v.strftime("%Y-%m-%d")
+        return f"{v.year}/{v.month}/{v.day}"
     s = str(v).strip()
     if not s:
         return ""
-    if len(s) >= 10 and s[4] == "-" and s[7] == "-":
-        return s[:10]
+    dt = _parse_any_datetime(s)
+    if dt is not None:
+        return f"{dt.year}/{dt.month}/{dt.day}"
     return s
+
+
+def _clean_text(v: Any) -> str:
+    if v is None:
+        return ""
+    s = str(v).strip()
+    return "" if s.lower() in ("none", "null", "nan") else s
+
+
+def _country_text_zh(v: Any) -> str:
+    code = _clean_text(v).upper()
+    if not code:
+        return ""
+    mapping = {
+        "US": "美国",
+        "CA": "加拿大",
+        "CN": "中国",
+    }
+    return mapping.get(code, code)
+
+
+def _address_type_zh(v: Any) -> str:
+    raw = _clean_text(v)
+    if not raw:
+        return ""
+    if raw in ("1", "住宅", "Residential", "residential"):
+        return "住宅"
+    if raw in ("2", "商业地址", "商业", "Business", "business"):
+        return "商业地址"
+    return raw
 
 
 def _to_zh_weekday(dt: datetime) -> str:
@@ -636,11 +667,6 @@ def list_internal_orders(limit: int = 50, offset: int = 0, db: Session = Depends
         if _bad_addr(ext_fields.get("客户地址")):
             ext_fields["客户地址"] = ""
         if not ext_fields.get("客户地址"):
-            def _clean_text(v):
-                if v is None:
-                    return ""
-                s = str(v).strip()
-                return "" if s.lower() in ("none", "null", "nan") else s
             name = ext_fields.get("receiver_name") or ext_fields.get("buyer_name") or ext_fields.get("customer_name")
             line1 = ext_fields.get("address_line1")
             line2 = ext_fields.get("address_line2")
@@ -663,9 +689,34 @@ def list_internal_orders(limit: int = 50, offset: int = 0, db: Session = Depends
             if zip5:
                 city_line = f"{city_line} {zip5}".strip()
             mid = " ".join([x for x in [line2, line3, district, doorplate] if x])
-            addr = "\n".join([x for x in [name, line1, mid, city_line] if x])
+            country_text = _country_text_zh(ext_fields.get("receiver_country_code") or ext_fields.get("country_code"))
+            address_type_text = _address_type_zh(ext_fields.get("address_type"))
+            buyer_contact = _clean_text(ext_fields.get("buyer_name"))
+            phone_text = _clean_text(ext_fields.get("电话") or ext_fields.get("receiver_mobile") or ext_fields.get("receiver_tel"))
+            addr = "\n".join(
+                [x for x in [name, line1, mid, city_line, country_text] if x]
+                + ([f"地址类型:  {address_type_text}"] if address_type_text else [])
+                + ([f"联系买家: {buyer_contact}"] if buyer_contact else [])
+                + ([f"电话: {phone_text}"] if phone_text else [])
+            )
             if addr:
                 ext_fields["客户地址"] = addr
+        # 地址补齐：国家/地址类型/联系买家/电话
+        if ext_fields.get("客户地址"):
+            addr_lines = [x.strip() for x in str(ext_fields.get("客户地址") or "").splitlines() if _clean_text(x)]
+            country_text = _country_text_zh(ext_fields.get("receiver_country_code") or ext_fields.get("country_code"))
+            if country_text and not any(x in ("美国", "加拿大", "中国") for x in addr_lines):
+                addr_lines.append(country_text)
+            address_type_text = _address_type_zh(ext_fields.get("address_type"))
+            if address_type_text and not any("地址类型" in x for x in addr_lines):
+                addr_lines.append(f"地址类型:  {address_type_text}")
+            buyer_contact = _clean_text(ext_fields.get("buyer_name"))
+            if buyer_contact and not any("联系买家:" in x for x in addr_lines):
+                addr_lines.append(f"联系买家: {buyer_contact}")
+            phone_text = _clean_text(ext_fields.get("电话") or ext_fields.get("receiver_mobile") or ext_fields.get("receiver_tel"))
+            if phone_text and not any(x.startswith("电话:") for x in addr_lines):
+                addr_lines.append(f"电话: {phone_text}")
+            ext_fields["客户地址"] = "\n".join(addr_lines)
         if ext_fields.get("fedex_method") and not ext_fields.get("联邦方式"):
             ext_fields["联邦方式"] = ext_fields.get("fedex_method")
         if ext_fields.get("fedex_no") and not ext_fields.get("联邦单号"):
@@ -947,11 +998,20 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
         if ws.max_row >= 2:
             ws.delete_rows(2, ws.max_row - 1)
         # write all blocks with copied style
-        split_cols_for_4row = [
-            "货代箱规", "计费重量", "花街单价", "头程运费总价", "毛重小于68kg",
-            "长cm", "宽cm", "高cm", "长in\n＜80", "长in＜80", "宽in", "高in",
-            "镑重量\n＜150lb", "镑重量＜150lb", "自算计费重", "oversize 130及165", "周长＜419",
-        ]
+        def _extract_column_merge_spans(ws_src, start_row: int, block_size: int):
+            spans = {c: 1 for c in range(1, ws_src.max_column + 1)}
+            end_row = start_row + block_size - 1
+            for m in ws_src.merged_cells.ranges:
+                if m.min_row >= start_row and m.max_row <= end_row and m.min_col == m.max_col:
+                    spans[m.min_col] = max(spans.get(m.min_col, 1), m.max_row - m.min_row + 1)
+            return spans
+
+        merge_spans_3 = _extract_column_merge_spans(ws_tpl, template_start_3, 3)
+        merge_spans_4 = (
+            _extract_column_merge_spans(ws_tpl, template_start_4, 4)
+            if template_start_4 is not None
+            else None
+        )
         image_anchors = []
         def _merged_anchor(r: int, c: int):
             for mr in ws.merged_cells.ranges:
@@ -1003,21 +1063,22 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
                     dst.border = copy(src.border)
                     dst.alignment = copy(src.alignment)
                     dst.protection = copy(src.protection)
-            # merges from template block with offset
-            for m in ws_tpl.merged_cells.ranges:
-                min_col, min_row, max_col, max_row = m.bounds
-                # 标准块复制
-                if min_row >= src_start and max_row <= src_start + min(3 if template_start_4 is None and use_4 else block_size, block_size) - 1:
-                    srow = min_row - src_start + start_row
-                    erow = max_row - src_start + start_row
-                    # 4行回退时，把跨3行的合并扩展到4行（A~Z等公共字段列）
-                    if use_4 and template_start_4 is None and (max_row - min_row + 1) == 3:
-                        erow = srow + 3
+            # apply strict per-column merge rules from template
+            if use_4 and merge_spans_4:
+                col_spans = merge_spans_4
+            elif use_4 and not merge_spans_4:
+                # fallback: extend 3-row rule to 4-row when no 4-row sample exists
+                col_spans = {c: (4 if s == 3 else s) for c, s in merge_spans_3.items()}
+            else:
+                col_spans = merge_spans_3
+            for c in range(1, ws.max_column + 1):
+                span = int(col_spans.get(c, 1) or 1)
+                if span > 1:
                     ws.merge_cells(
-                        start_row=srow,
-                        end_row=erow,
-                        start_column=min_col,
-                        end_column=max_col,
+                        start_row=start_row,
+                        end_row=start_row + min(span, block_size) - 1,
+                        start_column=c,
+                        end_column=c,
                     )
             # common values (merged)
             def setv(name, value, row=start_row):
@@ -1044,15 +1105,14 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
             setv("发货日", data.get("发货日", ""))
             setv("送达日", data.get("送达日", ""))
             if use_4:
-                # 4行时这些列不合并，按4行重复展示
-                for hn in split_cols_for_4row:
-                    cc = header_map.get(hn)
-                    if not cc:
+                # 4行模板中不合并的列，按4行分别写值
+                for cc in range(1, ws.max_column + 1):
+                    if int(col_spans.get(cc, 1) or 1) != 1:
                         continue
-                    for mr in list(ws.merged_cells.ranges):
-                        if mr.min_col <= cc <= mr.max_col and mr.min_row >= start_row and mr.max_row <= start_row + 3:
-                            ws.unmerge_cells(str(mr))
-                    v = data.get(hn, "")
+                    hname = str(ws.cell(1, cc).value or "").strip()
+                    v = data.get(hname, "")
+                    if v in (None, ""):
+                        continue
                     for rr in range(start_row, start_row + 4):
                         ws.cell(rr, cc).value = v
             # split lines
