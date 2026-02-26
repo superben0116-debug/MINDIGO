@@ -433,23 +433,60 @@
         return s;
       }
       function buildAddress(base, ext) {
-        const lines = String(base || "").split("\n").map(x => String(x || "").trim()).filter(Boolean);
-        const hasCountry = lines.some(x => ["美国", "加拿大", "中国"].includes(x));
-        const c = countryZh(ext.receiver_country_code || ext.country_code);
-        if (c && !hasCountry) lines.push(c);
-        if (!lines.some(x => x.includes("地址类型:"))) {
-          const t = addressTypeZh(ext.address_type);
-          if (t) lines.push(`地址类型:  ${t}`);
+        const name = String(ext.receiver_name || ext.buyer_name || "").trim();
+        const line1 = String(ext.address_line1 || "").trim();
+        const city = String(ext.city || "").trim();
+        const state = String(ext.state_or_region || "").trim();
+        const zip = String(ext.postal_code || "").trim();
+        const country = countryZh(ext.receiver_country_code || ext.country_code);
+        const addrType = addressTypeZh(ext.address_type);
+        const buyer = String(ext.buyer_name || "").trim();
+        const phone = String(ext["电话"] || ext.receiver_mobile || ext.receiver_tel || "").trim();
+
+        // 优先使用结构化字段，避免历史脏地址出现重复“电话/国家”
+        if (name || line1 || city || state || zip) {
+          const cityLine = [city, state].filter(Boolean).join(", ") + (zip ? ` ${zip}` : "");
+          return [
+            name,
+            line1,
+            cityLine.trim(),
+            country,
+            addrType ? `地址类型:  ${addrType}` : "",
+            buyer ? `联系买家:\t${buyer}` : "",
+            phone ? `电话:\t${phone}` : "",
+          ].filter(Boolean).join("\n");
         }
-        if (!lines.some(x => x.startsWith("联系买家:"))) {
-          const b = String(ext.buyer_name || "").trim();
-          if (b) lines.push(`联系买家: ${b}`);
+
+        // 回退：清洗已有地址文本并去重
+        const lines = String(base || "")
+          .replace(/\r/g, "\n")
+          .split("\n")
+          .map(x => String(x || "").trim())
+          .filter(Boolean);
+        const out = [];
+        let seenPhone = false;
+        let seenCountry = false;
+        for (const ln of lines) {
+          const low = ln.toLowerCase();
+          if ((ln === "美国" || ln === "加拿大" || ln === "中国")) {
+            if (seenCountry) continue;
+            seenCountry = true;
+            out.push(ln);
+            continue;
+          }
+          if (low.startsWith("电话:")) {
+            if (seenPhone) continue;
+            seenPhone = true;
+            out.push(ln);
+            continue;
+          }
+          out.push(ln);
         }
-        if (!lines.some(x => x.startsWith("电话:"))) {
-          const p = String(ext["电话"] || ext.receiver_mobile || ext.receiver_tel || "").trim();
-          if (p) lines.push(`电话: ${p}`);
-        }
-        return lines.join("\n");
+        if (!seenCountry && country) out.push(country);
+        if (addrType && !out.some(x => x.includes("地址类型:"))) out.push(`地址类型:  ${addrType}`);
+        if (buyer && !out.some(x => x.startsWith("联系买家:"))) out.push(`联系买家:\t${buyer}`);
+        if (!seenPhone && phone) out.push(`电话:\t${phone}`);
+        return out.join("\n");
       }
       function parseDate(v) {
         const s = String(v || "").trim().replace("T", " ");
