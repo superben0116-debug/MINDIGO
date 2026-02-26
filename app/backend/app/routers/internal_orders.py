@@ -1086,6 +1086,13 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
         formula_cols_4 = _detect_formula_cols(template_start_4, 4) if template_start_4 is not None else set()
         formula_map_3 = _detect_formula_map(template_start_3, 3)
         formula_map_4 = _detect_formula_map(template_start_4, 4) if template_start_4 is not None else {}
+        # 业务规则：AB（每箱套数）不使用公式，按数据写入/留空
+        ab_col = header_map.get("每箱套数")
+        if ab_col:
+            formula_cols_3.discard(ab_col)
+            formula_cols_4.discard(ab_col)
+            formula_map_3 = {(off, cc): f for (off, cc), f in formula_map_3.items() if cc != ab_col}
+            formula_map_4 = {(off, cc): f for (off, cc), f in formula_map_4.items() if cc != ab_col}
         image_anchors = []
         def _merged_anchor(r: int, c: int):
             for mr in ws.merged_cells.ranges:
