@@ -1247,6 +1247,39 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
                     ws.cell(rr, cc).value = Translator(f, origin=f"{get_column_letter(cc)}{src_rr}").translate_formula(f"{get_column_letter(cc)}{rr}")
                 except Exception:
                     ws.cell(rr, cc).value = f
+            # 4行补公式：模板部分共享公式在xml中会丢失，按列规则强制补齐R1-R4
+            if use_4:
+                c_ag = header_map.get("头程运费总价")
+                c_ae = header_map.get("计费重量")
+                c_af = header_map.get("花街单价")
+                c_an = header_map.get("长cm")
+                c_ao = header_map.get("宽cm")
+                c_ap = header_map.get("高cm")
+                c_am = header_map.get("毛重小于68kg")
+                c_aq = header_map.get("长in\n＜80") or header_map.get("长in＜80")
+                c_ar = header_map.get("宽in")
+                c_as = header_map.get("高in")
+                c_at = header_map.get("镑重量\n＜150lb") or header_map.get("镑重量＜150lb")
+                c_au = header_map.get("自算计费重")
+                c_bn = header_map.get("oversize 130及165")
+                c_bo = header_map.get("周长＜419")
+                for rr in range(start_row, start_row + 4):
+                    if c_ag and c_ae and c_af:
+                        ws.cell(rr, c_ag).value = f"={get_column_letter(c_ae)}{rr}*{get_column_letter(c_af)}{rr}"
+                    if c_aq and c_an:
+                        ws.cell(rr, c_aq).value = f"={get_column_letter(c_an)}{rr}/2.54"
+                    if c_ar and c_ao:
+                        ws.cell(rr, c_ar).value = f"={get_column_letter(c_ao)}{rr}/2.54"
+                    if c_as and c_ap:
+                        ws.cell(rr, c_as).value = f"={get_column_letter(c_ap)}{rr}/2.54"
+                    if c_at and c_am:
+                        ws.cell(rr, c_at).value = f"={get_column_letter(c_am)}{rr}*2.2046226"
+                    if c_au and c_an and c_ao and c_ap:
+                        ws.cell(rr, c_au).value = f"={get_column_letter(c_an)}{rr}*{get_column_letter(c_ao)}{rr}*{get_column_letter(c_ap)}{rr}/6000"
+                    if c_bn and c_aq and c_ar and c_as:
+                        ws.cell(rr, c_bn).value = f"={get_column_letter(c_aq)}{rr}+2*({get_column_letter(c_ar)}{rr}+{get_column_letter(c_as)}{rr})"
+                    if c_bo and c_an and c_ao and c_ap:
+                        ws.cell(rr, c_bo).value = f"={get_column_letter(c_an)}{rr}+2*({get_column_letter(c_ao)}{rr}+{get_column_letter(c_ap)}{rr})"
             # split lines
             name_col = header_map.get("产品名")
             marks_col = header_map.get("箱唛")
