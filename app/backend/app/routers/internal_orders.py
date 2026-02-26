@@ -93,6 +93,62 @@ def _address_type_zh(v: Any) -> str:
     return raw
 
 
+def _format_customer_address_block(fields: dict) -> str:
+    name = _clean_text(fields.get("receiver_name") or fields.get("buyer_name") or fields.get("customer_name"))
+    line1 = _clean_text(fields.get("address_line1"))
+    city = _clean_text(fields.get("city") or fields.get("customer_city"))
+    state = _clean_text(fields.get("state_or_region") or fields.get("customer_state"))
+    postal = _clean_text(fields.get("postal_code") or fields.get("customer_zip"))
+    country = _country_text_zh(fields.get("receiver_country_code") or fields.get("country_code"))
+    addr_type = _address_type_zh(fields.get("address_type"))
+    buyer = _clean_text(fields.get("buyer_name"))
+    phone = _clean_text(fields.get("电话") or fields.get("receiver_mobile") or fields.get("receiver_tel"))
+
+    city_line = f"{city}, {state}".strip(", ")
+    if postal:
+        city_line = f"{city_line} {postal}".strip()
+
+    rows = [
+        name,
+        line1,
+        city_line,
+        country,
+        f"地址类型:  {addr_type}" if addr_type else "",
+        f"联系买家:\t{buyer}" if buyer else "",
+        f"电话:\t{phone}" if phone else "",
+    ]
+    built = "\n".join([x for x in rows if x])
+    if built:
+        return built
+
+    # fallback: clean existing raw address text
+    raw = str(fields.get("客户地址") or fields.get("customer_address") or "").replace("\r", "\n").strip()
+    if not raw:
+        return ""
+    raw = re.sub(r"(电话:\s*[+\d][+\d\-\s]*)\s*美国", r"\1\n美国", raw)
+    raw = re.sub(r"(电话:\s*[+\d][+\d\-\s]*)\s*电话:\s*[+\d][+\d\-\s]*", r"\1", raw)
+    raw = re.sub(r"(\d{5}(?:-\d{4})?)\s*([A-Z][A-Z][A-Z\s&'.-]{2,})", r"\1\n\2", raw)
+    raw = re.sub(r"([A-Za-z][A-Za-z&'.\-\s]{2,})(\d{1,6}\s+[A-Za-z0-9#\-\s.]+)", r"\1\n\2", raw)
+    parts = [x.strip() for x in raw.split("\n") if _clean_text(x)]
+    seen_phone = False
+    out = []
+    for ln in parts:
+        if ln.startswith("电话:"):
+            if seen_phone:
+                continue
+            seen_phone = True
+        out.append(ln)
+    if country and country not in out:
+        out.append(country)
+    if addr_type and not any("地址类型:" in x for x in out):
+        out.append(f"地址类型:  {addr_type}")
+    if buyer and not any(x.startswith("联系买家:") for x in out):
+        out.append(f"联系买家:\t{buyer}")
+    if phone and not any(x.startswith("电话:") for x in out):
+        out.append(f"电话:\t{phone}")
+    return "\n".join(out)
+
+
 def _to_zh_weekday(dt: datetime) -> str:
     return ["周一", "周二", "周三", "周四", "周五", "周六", "周日"][dt.weekday()]
 
@@ -702,22 +758,10 @@ def list_internal_orders(limit: int = 50, offset: int = 0, db: Session = Depends
             )
             if addr:
                 ext_fields["客户地址"] = addr
-        # 地址补齐：国家/地址类型/联系买家/电话
-        if ext_fields.get("客户地址"):
-            addr_lines = [x.strip() for x in str(ext_fields.get("客户地址") or "").splitlines() if _clean_text(x)]
-            country_text = _country_text_zh(ext_fields.get("receiver_country_code") or ext_fields.get("country_code"))
-            if country_text and not any(x in ("美国", "加拿大", "中国") for x in addr_lines):
-                addr_lines.append(country_text)
-            address_type_text = _address_type_zh(ext_fields.get("address_type"))
-            if address_type_text and not any("地址类型" in x for x in addr_lines):
-                addr_lines.append(f"地址类型:  {address_type_text}")
-            buyer_contact = _clean_text(ext_fields.get("buyer_name"))
-            if buyer_contact and not any("联系买家:" in x for x in addr_lines):
-                addr_lines.append(f"联系买家: {buyer_contact}")
-            phone_text = _clean_text(ext_fields.get("电话") or ext_fields.get("receiver_mobile") or ext_fields.get("receiver_tel"))
-            if phone_text and not any(x.startswith("电话:") for x in addr_lines):
-                addr_lines.append(f"电话: {phone_text}")
-            ext_fields["客户地址"] = "\n".join(addr_lines)
+        # 地址统一格式化：国家/地址类型/联系买家/电话，去重并规范换行
+        formatted_addr = _format_customer_address_block(ext_fields)
+        if formatted_addr:
+            ext_fields["客户地址"] = formatted_addr
         if ext_fields.get("fedex_method") and not ext_fields.get("联邦方式"):
             ext_fields["联邦方式"] = ext_fields.get("fedex_method")
         if ext_fields.get("fedex_no") and not ext_fields.get("联邦单号"):
@@ -868,7 +912,7 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
                 "unit_price": ext.get("售价") or ext.get("unit_price") or "",
                 "image": str(ext.get("产品图") or ext.get("product_image") or "").strip(),
             }
-        customer_addr = str(ext.get("客户地址") or "").strip()
+        customer_addr = _format_customer_address_block(ext) or str(ext.get("客户地址") or "").strip()
         region = str(ext.get("区域") or "").strip()
         if not region:
             zip5 = str(ext.get("postal_code") or "").strip() or _extract_zip_from_address(customer_addr)
