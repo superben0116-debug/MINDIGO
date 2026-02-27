@@ -22,6 +22,7 @@ from app.routers.dev import router as dev_router
 from app.routers.lingxing_tools import router as lingxing_tools_router
 from app.routers.import_jobs import router as import_jobs_router
 from app.routers.auth import router as auth_router
+from app.routers.customer_service import router as customer_service_router
 
 app = FastAPI(title="Ultimate ERP")
 _auto_sync_started = False
@@ -98,6 +99,7 @@ class UINoCacheMiddleware(BaseHTTPMiddleware):
             "/integrations/lingxing",
             "/import-jobs",
             "/dev",
+            "/customer-service",
         )
         protected_supplier_prefixes = ("/supplier-quotes",)
         if path.startswith(protected_admin_prefixes) or path.startswith(protected_supplier_prefixes):
@@ -130,6 +132,7 @@ app.include_router(config_router, prefix="/config", tags=["config"])
 app.include_router(dev_router, prefix="/dev", tags=["dev"])
 app.include_router(lingxing_tools_router, prefix="/integrations/lingxing", tags=["lingxing-tools"])
 app.include_router(import_jobs_router, prefix="/import-jobs", tags=["import-jobs"])
+app.include_router(customer_service_router, prefix="/customer-service", tags=["customer-service"])
 
 frontend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "frontend"))
 app.mount("/ui", StaticFiles(directory=frontend_dir, html=True), name="ui")

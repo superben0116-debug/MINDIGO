@@ -224,6 +224,20 @@ def get_mp_order_list(access_token: str, app_id: str, payload: dict):
     resp = _HTTP.post(url, params=common, json=payload, timeout=30)
     return resp.json()
 
+
+def get_rma_manage_list(access_token: str, app_id: str, payload: dict):
+    url = f"{API_BASE}/basicOpen/customerService/rmaManage/list"
+    timestamp = int(time.time())
+    common = {
+        "access_token": access_token,
+        "app_key": app_id,
+        "timestamp": str(timestamp),
+    }
+    sign_params = {**common, **_sign_safe_payload(payload)}
+    common["sign"] = generate_sign(sign_params, app_id)
+    resp = _HTTP.post(url, params=common, json=payload, timeout=30)
+    return resp.json()
+
 def get_mws_orders(
     access_token: str,
     app_id: str,
