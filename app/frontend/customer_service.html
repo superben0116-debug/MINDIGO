@@ -54,6 +54,7 @@
       <div class="tabs" id="tabs"></div>
       <div class="toolbar">
         <input id="sidInput" placeholder="店铺ID，逗号分隔，如 114,115" style="min-width:220px;" />
+        <select id="shopSelect" multiple style="min-width:260px; max-width:360px; height:92px;"></select>
         <input id="startTime" type="date" />
         <input id="endTime" type="date" />
         <select id="searchField">
@@ -67,6 +68,7 @@
       <div class="content">
         <div class="panel list" id="list"></div>
         <div class="panel detail">
+          <div id="debugBox" class="meta" style="padding:8px 12px; border-bottom:1px solid var(--line);">未查询</div>
           <div id="emptyTip" class="meta">请选择左侧对话。</div>
           <div id="detailBox" style="display:none;">
             <div class="grid" id="metaGrid"></div>
@@ -130,6 +132,8 @@
     renderTabs("/ui/customer_service.html");
 
     const listEl = document.getElementById("list");
+    const shopSelect = document.getElementById("shopSelect");
+    const debugBox = document.getElementById("debugBox");
     const emptyTip = document.getElementById("emptyTip");
     const detailBox = document.getElementById("detailBox");
     const metaGrid = document.getElementById("metaGrid");
@@ -146,6 +150,27 @@
       document.getElementById("endTime").value = end;
       const sid = localStorage.getItem("cs_sid") || "114,115";
       document.getElementById("sidInput").value = sid;
+    }
+
+    async function loadShops() {
+      shopSelect.innerHTML = "";
+      try {
+        const res = await fetch("/customer-service/shops");
+        const out = await res.json();
+        if (!res.ok || out.detail) {
+          debugBox.textContent = `店铺加载失败: ${JSON.stringify(out.detail || out)}`;
+          return;
+        }
+        const items = out.items || [];
+        items.forEach(s => {
+          const op = document.createElement("option");
+          op.value = String(s.sid);
+          op.textContent = `${s.shop_name || s.sid} (${s.sid})`;
+          shopSelect.appendChild(op);
+        });
+      } catch (e) {
+        debugBox.textContent = `店铺加载异常: ${e.message || e}`;
+      }
     }
 
     function renderList() {
@@ -195,7 +220,9 @@
     async function loadRma() {
       const sidRaw = document.getElementById("sidInput").value || "";
       localStorage.setItem("cs_sid", sidRaw);
-      const sid = sidRaw.split(",").map(x => x.trim()).filter(Boolean).map(x => Number(x)).filter(x => !Number.isNaN(x));
+      const sidByInput = sidRaw.split(",").map(x => x.trim()).filter(Boolean).map(x => Number(x)).filter(x => !Number.isNaN(x));
+      const sidBySelect = Array.from(shopSelect.selectedOptions || []).map(x => Number(x.value)).filter(x => !Number.isNaN(x));
+      const sid = sidBySelect.length ? sidBySelect : sidByInput;
       const payload = {
         sid,
         searchTimeFiled: "operationTime",
@@ -216,9 +243,11 @@
       const out = await res.json();
       if (!res.ok || out.detail) {
         alert(`查询失败: ${JSON.stringify(out.detail || out)}`);
+        debugBox.textContent = `查询失败: ${JSON.stringify(out.detail || out)}`;
         return;
       }
       rows = out.items || [];
+      debugBox.textContent = `已抓取: ${rows.length} / 总数: ${out.total || 0} / 店铺SID: ${(sid || []).join(",") || "自动"} / 时间: ${payload.startTime}~${payload.endTime}`;
       activeId = rows[0]?.id || null;
       renderList();
       if (rows[0]) renderDetail(rows[0]);
@@ -267,8 +296,8 @@
     });
 
     seedDates();
+    loadShops();
     loadRma();
   </script>
 </body>
 </html>
-

@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.db import SessionLocal
 from app.config_store import get_lingxing_config
-from app.integrations.lingxing_client import get_access_token, get_rma_manage_list
+from app.integrations.lingxing_client import get_access_token, get_rma_manage_list, get_shop_list
 
 router = APIRouter()
 
@@ -59,6 +59,13 @@ def rma_list(payload: dict, db: Session = Depends(get_db)):
         else:
             sid = []
     if not sid:
+        try:
+            shops = get_shop_list(access_token, app_id)
+            if shops.get("code") == 0:
+                sid = [int(s.get("sid")) for s in (shops.get("data") or []) if str(s.get("sid") or "").isdigit()]
+        except Exception:
+            sid = []
+    if not sid:
         raise HTTPException(status_code=400, detail="missing sid; please set sid_list in config or pass sid")
 
     today = datetime.utcnow().date()
@@ -70,7 +77,7 @@ def rma_list(payload: dict, db: Session = Depends(get_db)):
         "searchTimeFiled": str(payload.get("searchTimeFiled") or "operationTime"),
         "startTime": start,
         "endTime": end,
-        "searchValue": payload.get("searchValue") or [],
+        "searchValue": payload.get("searchValue") or [""],
         "searchField": str(payload.get("searchField") or "msku"),
         "sortColumn": str(payload.get("sortColumn") or "operationTime"),
         "sortType": str(payload.get("sortType") or "desc"),
@@ -118,6 +125,36 @@ def rma_list(payload: dict, db: Session = Depends(get_db)):
     }
 
 
+@router.get("/shops")
+def customer_service_shops(db: Session = Depends(get_db)):
+    cfg = get_lingxing_config(db)
+    app_id = str(cfg.get("app_id") or "").strip()
+    app_secret = str(cfg.get("app_secret") or "").strip()
+    if not app_id or not app_secret:
+        raise HTTPException(status_code=400, detail="missing app_id/app_secret")
+    token = get_access_token(app_id, app_secret)
+    if token.get("code") not in (200, "200"):
+        raise HTTPException(status_code=400, detail=str(token))
+    access_token = token.get("data", {}).get("access_token")
+    shops = get_shop_list(access_token, app_id)
+    if shops.get("code") != 0:
+        raise HTTPException(status_code=400, detail=shops)
+    rows = []
+    for s in (shops.get("data") or []):
+        sid = s.get("sid")
+        if sid is None:
+            continue
+        rows.append(
+            {
+                "sid": int(sid),
+                "shop_name": s.get("seller_name") or s.get("shop_name") or "",
+                "country": s.get("country") or "",
+                "marketplace": s.get("marketplace") or "",
+            }
+        )
+    return {"items": rows}
+
+
 @router.post("/reply/ai")
 def ai_reply(payload: dict):
     text = str(payload.get("text") or "").strip()
@@ -129,4 +166,3 @@ def ai_reply(payload: dict):
     else:
         out = "Thanks for your message. We have received your request and will provide a solution within 24 hours."
     return {"reply": out}
-
