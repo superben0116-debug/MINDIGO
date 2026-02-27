@@ -4,7 +4,13 @@ from sqlalchemy.orm import Session
 
 from app.db import SessionLocal
 from app.config_store import get_lingxing_config
-from app.integrations.lingxing_client import get_access_token, get_rma_manage_list, get_shop_list
+from app.integrations.lingxing_client import (
+    get_access_token,
+    get_rma_manage_list,
+    get_shop_list,
+    get_mail_list,
+    get_mail_detail,
+)
 
 router = APIRouter()
 
@@ -148,6 +154,12 @@ def customer_service_shops(db: Session = Depends(get_db)):
             {
                 "sid": int(sid),
                 "shop_name": s.get("seller_name") or s.get("shop_name") or "",
+                "email": s.get("email")
+                or s.get("bind_email")
+                or s.get("mail")
+                or s.get("mailbox")
+                or s.get("account_email")
+                or "",
                 "country": s.get("country") or "",
                 "marketplace": s.get("marketplace") or "",
             }
@@ -166,3 +178,105 @@ def ai_reply(payload: dict):
     else:
         out = "Thanks for your message. We have received your request and will provide a solution within 24 hours."
     return {"reply": out}
+
+
+@router.post("/mail/list")
+def mail_list(payload: dict, db: Session = Depends(get_db)):
+    cfg = get_lingxing_config(db)
+    app_id = str(cfg.get("app_id") or "").strip()
+    app_secret = str(cfg.get("app_secret") or "").strip()
+    if not app_id or not app_secret:
+        raise HTTPException(status_code=400, detail="missing app_id/app_secret")
+    token = get_access_token(app_id, app_secret)
+    if token.get("code") not in (200, "200"):
+        raise HTTPException(status_code=400, detail=str(token))
+    access_token = token.get("data", {}).get("access_token")
+
+    emails = payload.get("emails") or []
+    emails = [str(x).strip() for x in emails if str(x).strip()]
+    if not emails:
+        raise HTTPException(status_code=400, detail="missing emails")
+
+    start_date = _to_date(payload.get("start_date")) or _to_date(payload.get("startTime"))
+    end_date = _to_date(payload.get("end_date")) or _to_date(payload.get("endTime"))
+    flag = str(payload.get("flag") or "receive").strip()
+    offset = int(payload.get("offset") or 0)
+    length = int(payload.get("length") or 50)
+
+    items = []
+    total = 0
+    sent_subjects = set()
+    debug = []
+
+    # 先取 sent，建立“已回复”对照
+    for em in emails:
+        body_sent = {
+            "flag": "sent",
+            "email": em,
+            "start_date": start_date,
+            "end_date": end_date,
+            "offset": 0,
+            "length": max(length, 100),
+        }
+        rs = get_mail_list(access_token, app_id, body_sent)
+        if rs.get("code") == 0:
+            for r in (rs.get("data") or []):
+                sub = str(r.get("subject") or "").strip().lower()
+                if sub:
+                    sent_subjects.add(sub)
+        else:
+            debug.append({"email": em, "stage": "sent", "error": rs})
+
+    for em in emails:
+        body = {
+            "flag": flag,
+            "email": em,
+            "start_date": start_date,
+            "end_date": end_date,
+            "offset": offset,
+            "length": length,
+        }
+        res = get_mail_list(access_token, app_id, body)
+        if res.get("code") != 0:
+            debug.append({"email": em, "stage": "list", "error": res})
+            continue
+        total += int(res.get("total") or 0)
+        for r in (res.get("data") or []):
+            subject = str(r.get("subject") or "")
+            reply_status = "已回复" if subject.strip().lower() in sent_subjects else ("已回复" if flag == "sent" else "待回复")
+            items.append(
+                {
+                    "webmail_uuid": r.get("webmail_uuid"),
+                    "date": r.get("date"),
+                    "subject": subject,
+                    "from_name": r.get("from_name"),
+                    "from_address": r.get("from_address"),
+                    "to_name": r.get("to_name"),
+                    "to_address": r.get("to_address"),
+                    "has_attachment": r.get("has_attachment"),
+                    "email": em,
+                    "replyStatus": reply_status,
+                }
+            )
+    items.sort(key=lambda x: str(x.get("date") or ""), reverse=True)
+    return {"total": total, "items": items, "debug": debug}
+
+
+@router.post("/mail/detail")
+def mail_detail(payload: dict, db: Session = Depends(get_db)):
+    webmail_uuid = str(payload.get("webmail_uuid") or "").strip()
+    if not webmail_uuid:
+        raise HTTPException(status_code=400, detail="missing webmail_uuid")
+    cfg = get_lingxing_config(db)
+    app_id = str(cfg.get("app_id") or "").strip()
+    app_secret = str(cfg.get("app_secret") or "").strip()
+    if not app_id or not app_secret:
+        raise HTTPException(status_code=400, detail="missing app_id/app_secret")
+    token = get_access_token(app_id, app_secret)
+    if token.get("code") not in (200, "200"):
+        raise HTTPException(status_code=400, detail=str(token))
+    access_token = token.get("data", {}).get("access_token")
+    res = get_mail_detail(access_token, app_id, webmail_uuid)
+    if res.get("code") != 0:
+        raise HTTPException(status_code=400, detail=res)
+    return {"item": res.get("data") or {}}

@@ -5,37 +5,35 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>客服界面</title>
   <style>
-    :root { --bg:#f4f6fb; --ink:#0f172a; --muted:#64748b; --line:#e2e8f0; --card:#fff; --accent:#2563eb; --ok:#16a34a; --warn:#ef4444; }
+    :root { --bg:#f4f6fb; --ink:#0f172a; --muted:#64748b; --line:#e2e8f0; --ok:#16a34a; --wait:#ef4444; }
     body { margin:0; font-family:"SF Pro Text",-apple-system,BlinkMacSystemFont,"Noto Sans SC",sans-serif; background:var(--bg); color:var(--ink); }
     .layout { display:grid; grid-template-columns:72px 1fr; min-height:100vh; }
     .sidebar { background:#111827; color:#cbd5e1; padding:12px 6px; display:flex; flex-direction:column; gap:10px; }
     .side-item { text-align:center; font-size:11px; padding:8px 6px; border-radius:10px; cursor:pointer; }
     .side-item.active { background:#1f2937; color:#fff; }
     .main { display:flex; flex-direction:column; min-width:0; }
-    .topbar { background:#0b1220; color:#e5e7eb; padding:8px 16px; display:flex; gap:12px; align-items:center; }
-    .tabs { background:#fff; border-bottom:1px solid var(--line); padding:8px 16px; display:flex; gap:8px; flex-wrap:wrap; }
+    .topbar { background:#0b1220; color:#e5e7eb; padding:8px 16px; }
+    .tabs { background:#fff; border-bottom:1px solid var(--line); padding:8px 16px; display:flex; gap:8px; }
     .tab { background:#f1f5f9; color:#111827; padding:6px 10px; border-radius:999px; font-size:12px; cursor:pointer; }
     .tab.active { background:#111827; color:#fff; }
     .toolbar { background:#fff; border-bottom:1px solid var(--line); padding:10px 16px; display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
     .toolbar input, .toolbar select, .toolbar button { border:1px solid var(--line); border-radius:8px; padding:8px 10px; font-size:13px; }
     .toolbar button { background:#2563eb; color:#fff; border-color:#2563eb; cursor:pointer; }
-    .content { display:grid; grid-template-columns: 360px 1fr; gap:12px; padding:12px; min-height:0; flex:1; }
+    .content { display:grid; grid-template-columns:360px 1fr; gap:12px; padding:12px; min-height:0; flex:1; }
     .panel { background:#fff; border:1px solid var(--line); border-radius:12px; overflow:auto; min-height:0; }
     .list .row { border-bottom:1px solid var(--line); padding:10px; cursor:pointer; }
     .list .row.active { background:#eef4ff; }
     .meta { font-size:12px; color:var(--muted); }
     .tag { display:inline-block; border-radius:999px; font-size:11px; padding:2px 8px; margin-left:6px; }
-    .ok { background:#dcfce7; color:#166534; }
-    .wait { background:#fee2e2; color:#991b1b; }
+    .ok { background:#dcfce7; color:#166534; } .wait { background:#fee2e2; color:#991b1b; }
     .detail { padding:12px; }
-    .grid { display:grid; grid-template-columns: 1fr 1fr; gap:8px; }
+    .grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
     .field { border:1px solid var(--line); border-radius:8px; padding:8px; }
     .field .k { font-size:12px; color:var(--muted); }
     .field .v { font-size:13px; margin-top:4px; white-space:pre-wrap; word-break:break-word; }
-    textarea { width:100%; min-height:120px; border:1px solid var(--line); border-radius:10px; padding:10px; font-size:14px; }
-    .reply-tools { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
-    .reply-tools button { border:1px solid var(--line); border-radius:8px; padding:8px 10px; background:#fff; cursor:pointer; }
-    .hint { font-size:12px; color:var(--muted); margin-top:6px; }
+    textarea { width:100%; min-height:110px; border:1px solid var(--line); border-radius:10px; padding:10px; font-size:14px; }
+    .tools { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
+    .tools button, .tools select { border:1px solid var(--line); border-radius:8px; padding:8px 10px; background:#fff; cursor:pointer; }
   </style>
 </head>
 <body>
@@ -50,48 +48,39 @@
       <div class="side-item" data-go="/ui/suppliers.html">供应商</div>
     </div>
     <div class="main">
-      <div class="topbar">终极 ERP · 客服（RMA）</div>
+      <div class="topbar">终极 ERP · 客服（邮件消息）</div>
       <div class="tabs" id="tabs"></div>
       <div class="toolbar">
-        <input id="sidInput" placeholder="店铺ID，逗号分隔，如 114,115" style="min-width:220px;" />
-        <select id="shopSelect" multiple style="min-width:260px; max-width:360px; height:92px;"></select>
-        <input id="startTime" type="date" />
-        <input id="endTime" type="date" />
-        <select id="searchField">
-          <option value="msku">MSKU</option>
-          <option value="asin">ASIN</option>
-          <option value="sku">SKU</option>
-        </select>
-        <input id="searchValue" placeholder="搜索值，逗号分隔" />
-        <button id="loadBtn">查询RMA</button>
+        <input id="shopFilter" placeholder="店铺名筛选（可选）" />
+        <select id="shopSelect" multiple style="min-width:360px; max-width:460px; height:96px;"></select>
+        <select id="flag"><option value="receive">收件</option><option value="sent">发件</option></select>
+        <input id="startDate" type="date" />
+        <input id="endDate" type="date" />
+        <button id="loadBtn">查询邮件</button>
       </div>
       <div class="content">
         <div class="panel list" id="list"></div>
         <div class="panel detail">
-          <div id="debugBox" class="meta" style="padding:8px 12px; border-bottom:1px solid var(--line);">未查询</div>
-          <div id="emptyTip" class="meta">请选择左侧对话。</div>
-          <div id="detailBox" style="display:none;">
-            <div class="grid" id="metaGrid"></div>
-            <div style="margin-top:10px;">
-              <div class="meta" style="margin-bottom:6px;">对话内容 / 备注</div>
-              <div class="field"><div class="v" id="rawText"></div></div>
-            </div>
-            <div style="margin-top:10px;">
-              <div class="meta" style="margin-bottom:6px;">快速答复</div>
-              <textarea id="replyText" placeholder="输入回复内容"></textarea>
-              <div class="reply-tools">
-                <select id="tplSelect">
-                  <option value="">选择模板</option>
-                  <option value="refund">退款模板</option>
-                  <option value="replace">补发模板</option>
-                  <option value="logistics">物流延迟模板</option>
-                </select>
-                <button id="applyTplBtn">套用模板</button>
-                <button id="translateBtn">快速翻译</button>
-                <button id="aiReplyBtn">AI 回复</button>
-                <button id="markRepliedBtn">标记已回复</button>
-              </div>
-              <div class="hint">说明：当前先接通查询与对话处理，发送回亚马逊站内信接口后续接入。</div>
+          <div id="debug" class="meta" style="padding:8px 12px; border-bottom:1px solid var(--line);">未查询</div>
+          <div id="metaGrid" class="grid" style="margin-top:10px;"></div>
+          <div style="margin-top:10px;">
+            <div class="meta">邮件正文</div>
+            <div class="field"><div class="v" id="mailBody">请选择左侧邮件。</div></div>
+          </div>
+          <div style="margin-top:10px;">
+            <div class="meta">快速答复</div>
+            <textarea id="replyText" placeholder="输入回复内容"></textarea>
+            <div class="tools">
+              <select id="tplSelect">
+                <option value="">选择模板</option>
+                <option value="refund">退款模板</option>
+                <option value="replace">补发模板</option>
+                <option value="delay">物流延迟模板</option>
+              </select>
+              <button id="tplBtn">套用模板</button>
+              <button id="translateBtn">快速翻译</button>
+              <button id="aiBtn">AI 回复</button>
+              <button id="doneBtn">标记已回复</button>
             </div>
           </div>
         </div>
@@ -100,204 +89,132 @@
   </div>
   <script>
     const tabsEl = document.getElementById("tabs");
-    function openTab(label, url) {
-      const tabs = JSON.parse(localStorage.getItem("tabs") || "[]");
-      if (!tabs.find(t => t.url === url)) tabs.push({ label, url });
-      localStorage.setItem("tabs", JSON.stringify(tabs));
-      renderTabs(url);
-    }
-    function renderTabs(activeUrl) {
-      const tabs = JSON.parse(localStorage.getItem("tabs") || "[]");
-      if (!tabs.length) {
-        tabs.push({ label: "客服", url: "/ui/customer_service.html" });
-        localStorage.setItem("tabs", JSON.stringify(tabs));
-      }
-      tabsEl.innerHTML = "";
-      tabs.forEach(t => {
-        const el = document.createElement("div");
-        el.className = "tab" + (t.url === activeUrl ? " active" : "");
-        el.textContent = t.label;
-        el.onclick = () => location.href = t.url;
-        tabsEl.appendChild(el);
-      });
-    }
-    document.querySelectorAll(".side-item").forEach(el => {
-      el.addEventListener("click", () => {
-        const url = el.dataset.go;
-        if (!url) return;
-        openTab(el.textContent.trim(), url);
-        location.href = url;
-      });
-    });
+    function openTab(label, url){const tabs=JSON.parse(localStorage.getItem("tabs")||"[]");if(!tabs.find(t=>t.url===url))tabs.push({label,url});localStorage.setItem("tabs",JSON.stringify(tabs));renderTabs(url);}
+    function renderTabs(activeUrl){const tabs=JSON.parse(localStorage.getItem("tabs")||"[]");if(!tabs.length){tabs.push({label:"客服",url:"/ui/customer_service.html"});localStorage.setItem("tabs",JSON.stringify(tabs));}tabsEl.innerHTML="";tabs.forEach(t=>{const el=document.createElement("div");el.className="tab"+(t.url===activeUrl?" active":"");el.textContent=t.label;el.onclick=()=>location.href=t.url;tabsEl.appendChild(el);});}
+    document.querySelectorAll(".side-item").forEach(el=>el.onclick=()=>{const url=el.dataset.go;if(!url)return;openTab(el.textContent.trim(),url);location.href=url;});
     renderTabs("/ui/customer_service.html");
 
     const listEl = document.getElementById("list");
+    const debugEl = document.getElementById("debug");
     const shopSelect = document.getElementById("shopSelect");
-    const debugBox = document.getElementById("debugBox");
-    const emptyTip = document.getElementById("emptyTip");
-    const detailBox = document.getElementById("detailBox");
     const metaGrid = document.getElementById("metaGrid");
-    const rawText = document.getElementById("rawText");
+    const mailBody = document.getElementById("mailBody");
     const replyText = document.getElementById("replyText");
+    let shops = [];
     let rows = [];
-    let activeId = null;
+    let activeId = "";
 
-    function seedDates() {
+    function seedDate() {
       const now = new Date();
-      const end = now.toISOString().slice(0, 10);
-      const start = new Date(now.getTime() - 7 * 24 * 3600 * 1000).toISOString().slice(0, 10);
-      document.getElementById("startTime").value = start;
-      document.getElementById("endTime").value = end;
-      const sid = localStorage.getItem("cs_sid") || "114,115";
-      document.getElementById("sidInput").value = sid;
+      const end = now.toISOString().slice(0,10);
+      const start = new Date(now.getTime() - 7*24*3600*1000).toISOString().slice(0,10);
+      document.getElementById("startDate").value = start;
+      document.getElementById("endDate").value = end;
     }
 
     async function loadShops() {
+      const r = await fetch("/customer-service/shops");
+      const o = await r.json().catch(()=>({}));
+      if (!r.ok || o.detail) { debugEl.textContent = `店铺加载失败: ${JSON.stringify(o.detail || o)}`; return; }
+      shops = o.items || [];
+      renderShopOptions();
+    }
+
+    function renderShopOptions() {
+      const kw = (document.getElementById("shopFilter").value || "").trim().toLowerCase();
       shopSelect.innerHTML = "";
-      try {
-        const res = await fetch("/customer-service/shops");
-        const out = await res.json();
-        if (!res.ok || out.detail) {
-          debugBox.textContent = `店铺加载失败: ${JSON.stringify(out.detail || out)}`;
-          return;
-        }
-        const items = out.items || [];
-        items.forEach(s => {
-          const op = document.createElement("option");
-          op.value = String(s.sid);
-          op.textContent = `${s.shop_name || s.sid} (${s.sid})`;
-          shopSelect.appendChild(op);
-        });
-      } catch (e) {
-        debugBox.textContent = `店铺加载异常: ${e.message || e}`;
-      }
+      const filtered = shops.filter(s => !kw || String(s.shop_name || "").toLowerCase().includes(kw));
+      filtered.forEach(s => {
+        const op = document.createElement("option");
+        op.value = String(s.sid);
+        op.dataset.email = s.email || "";
+        op.textContent = `${s.shop_name || s.sid}${s.email ? ` · ${s.email}` : " · (无邮箱)"}`;
+        shopSelect.appendChild(op);
+      });
     }
 
     function renderList() {
       listEl.innerHTML = "";
-      if (!rows.length) {
-        listEl.innerHTML = '<div class="row meta">暂无数据</div>';
-        return;
-      }
+      if (!rows.length) { listEl.innerHTML = '<div class="row meta">暂无邮件</div>'; return; }
       rows.forEach(r => {
         const div = document.createElement("div");
-        div.className = "row" + (activeId === r.id ? " active" : "");
+        div.className = "row" + (String(r.webmail_uuid) === String(activeId) ? " active" : "");
         const st = r.replyStatus === "已回复" ? '<span class="tag ok">已回复</span>' : '<span class="tag wait">待回复</span>';
-        div.innerHTML = `
-          <div><strong>${r.buyerName || r.sellerSku || r.asin || "-"}</strong>${st}</div>
-          <div class="meta">${r.sellerName || "-"} · ${r.country || "-"} · ${r.createTime || ""}</div>
-          <div class="meta">订单: ${r.amazonOrderId || "-"} / RMA: ${r.rmaNo || "-"}</div>
-        `;
-        div.onclick = () => {
-          activeId = r.id;
-          renderList();
-          renderDetail(r);
-        };
+        div.innerHTML = `<div><strong>${r.subject || "(无标题)"}</strong>${st}</div><div class="meta">${r.date || ""}</div><div class="meta">${r.from_address || ""} → ${r.to_address || ""}</div>`;
+        div.onclick = () => { activeId = r.webmail_uuid; renderList(); loadDetail(r); };
         listEl.appendChild(div);
       });
     }
 
-    function renderDetail(r) {
-      emptyTip.style.display = "none";
-      detailBox.style.display = "";
+    async function loadDetail(r) {
       const fields = [
-        ["回复状态", r.replyStatus || "-"],
-        ["店铺", r.sellerName || "-"],
-        ["国家", r.country || "-"],
-        ["订单号", r.amazonOrderId || "-"],
-        ["ASIN", r.asin || "-"],
-        ["MSKU", r.sellerSku || "-"],
-        ["本地SKU", r.sku || "-"],
-        ["渠道", r.channelSourceName || "-"],
-        ["售后类型", r.afterSaleTypeName || "-"],
-        ["处理方式", r.processWayName || "-"],
+        ["状态", r.replyStatus || "-"],
+        ["时间", r.date || "-"],
+        ["标题", r.subject || "-"],
+        ["发件人", `${r.from_name || ""} <${r.from_address || ""}>`],
+        ["收件人", `${r.to_name || ""} <${r.to_address || ""}>`],
+        ["邮箱", r.email || "-"],
       ];
-      metaGrid.innerHTML = fields.map(([k, v]) => `<div class="field"><div class="k">${k}</div><div class="v">${v}</div></div>`).join("");
-      rawText.textContent = r.remark || r.itemName || "";
-      replyText.value = "";
+      metaGrid.innerHTML = fields.map(([k,v]) => `<div class="field"><div class="k">${k}</div><div class="v">${v}</div></div>`).join("");
+      mailBody.textContent = "详情加载中...";
+      const res = await fetch("/customer-service/mail/detail", { method:"POST", headers:{ "Content-Type":"application/json" }, body:JSON.stringify({ webmail_uuid:r.webmail_uuid }) });
+      const out = await res.json().catch(()=>({}));
+      if (!res.ok || out.detail) { mailBody.textContent = `详情加载失败: ${JSON.stringify(out.detail || out)}`; return; }
+      const item = out.item || {};
+      mailBody.innerHTML = item.text_html || item.text_plain || "(空)";
     }
 
-    async function loadRma() {
-      const sidRaw = document.getElementById("sidInput").value || "";
-      localStorage.setItem("cs_sid", sidRaw);
-      const sidByInput = sidRaw.split(",").map(x => x.trim()).filter(Boolean).map(x => Number(x)).filter(x => !Number.isNaN(x));
-      const sidBySelect = Array.from(shopSelect.selectedOptions || []).map(x => Number(x.value)).filter(x => !Number.isNaN(x));
-      const sid = sidBySelect.length ? sidBySelect : sidByInput;
+    async function loadMail() {
+      const selected = Array.from(shopSelect.selectedOptions || []);
+      const emails = Array.from(new Set(selected.map(x => String(x.dataset.email || "").trim()).filter(Boolean)));
+      if (!emails.length) { alert("请先选择有绑定邮箱的店铺。"); return; }
       const payload = {
-        sid,
-        searchTimeFiled: "operationTime",
-        startTime: document.getElementById("startTime").value,
-        endTime: document.getElementById("endTime").value,
-        searchField: document.getElementById("searchField").value,
-        searchValue: (document.getElementById("searchValue").value || "").split(",").map(x => x.trim()).filter(Boolean),
-        sortColumn: "operationTime",
-        sortType: "desc",
-        pageNum: 1,
-        pageSize: 100,
+        flag: document.getElementById("flag").value,
+        emails,
+        start_date: document.getElementById("startDate").value,
+        end_date: document.getElementById("endDate").value,
+        offset: 0,
+        length: 100,
       };
-      const res = await fetch("/customer-service/rma/list", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const out = await res.json();
-      if (!res.ok || out.detail) {
-        alert(`查询失败: ${JSON.stringify(out.detail || out)}`);
-        debugBox.textContent = `查询失败: ${JSON.stringify(out.detail || out)}`;
-        return;
-      }
+      const res = await fetch("/customer-service/mail/list", { method:"POST", headers:{ "Content-Type":"application/json" }, body:JSON.stringify(payload) });
+      const out = await res.json().catch(()=>({}));
+      if (!res.ok || out.detail) { debugEl.textContent = `查询失败: ${JSON.stringify(out.detail || out)}`; return; }
       rows = out.items || [];
-      debugBox.textContent = `已抓取: ${rows.length} / 总数: ${out.total || 0} / 店铺SID: ${(sid || []).join(",") || "自动"} / 时间: ${payload.startTime}~${payload.endTime}`;
-      activeId = rows[0]?.id || null;
+      debugEl.textContent = `已抓取: ${rows.length} / 总数: ${out.total || 0} / 邮箱: ${emails.join(",")}${out.debug && out.debug.length ? ` / 调试: ${JSON.stringify(out.debug).slice(0,280)}` : ""}`;
+      activeId = rows[0]?.webmail_uuid || "";
       renderList();
-      if (rows[0]) renderDetail(rows[0]);
-      else {
-        emptyTip.style.display = "";
-        detailBox.style.display = "none";
-      }
+      if (rows[0]) loadDetail(rows[0]);
+      else { metaGrid.innerHTML = ""; mailBody.textContent = "暂无邮件"; }
     }
 
-    document.getElementById("loadBtn").addEventListener("click", loadRma);
-
-    document.getElementById("applyTplBtn").addEventListener("click", () => {
-      const k = document.getElementById("tplSelect").value;
-      const tpls = {
-        refund: "Hello, we are sorry for the inconvenience. We can arrange a refund for your order after confirmation.",
-        replace: "Hello, we are sorry for the issue. We can arrange a replacement after confirming your shipping address.",
-        logistics: "Hello, your package is in transit. We are following up with the carrier and will update you shortly.",
+    document.getElementById("shopFilter").addEventListener("input", renderShopOptions);
+    document.getElementById("loadBtn").addEventListener("click", loadMail);
+    document.getElementById("tplBtn").addEventListener("click", () => {
+      const t = document.getElementById("tplSelect").value;
+      const map = {
+        refund: "Hello, we are sorry for the inconvenience. We can arrange a refund for your order.",
+        replace: "Hello, we can arrange a replacement after confirming your shipping address.",
+        delay: "Hello, your package is in transit. We are following up with the carrier now."
       };
-      if (k && tpls[k]) replyText.value = tpls[k];
+      if (map[t]) replyText.value = map[t];
     });
-
-    document.getElementById("translateBtn").addEventListener("click", async () => {
-      const txt = replyText.value.trim();
-      if (!txt) return;
-      // 先用浏览器内置能力最小实现：中文<->英文直接保留原文并标记
-      replyText.value = `【翻译】${txt}`;
-    });
-
-    document.getElementById("aiReplyBtn").addEventListener("click", async () => {
-      const txt = rawText.textContent || "";
-      const res = await fetch("/customer-service/reply/ai", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: txt, lang: "en" }),
-      });
-      const out = await res.json();
+    document.getElementById("translateBtn").addEventListener("click", () => { if (replyText.value.trim()) replyText.value = `【翻译】${replyText.value.trim()}`; });
+    document.getElementById("aiBtn").addEventListener("click", async () => {
+      const txt = String(mailBody.textContent || "").trim();
+      const res = await fetch("/customer-service/reply/ai", { method:"POST", headers:{ "Content-Type":"application/json" }, body:JSON.stringify({ text: txt, lang: "en" }) });
+      const out = await res.json().catch(()=>({}));
       replyText.value = out.reply || "";
     });
-
-    document.getElementById("markRepliedBtn").addEventListener("click", () => {
+    document.getElementById("doneBtn").addEventListener("click", () => {
       if (!activeId) return;
-      const idx = rows.findIndex(x => String(x.id) === String(activeId));
-      if (idx >= 0) rows[idx].replyStatus = "已回复";
+      const i = rows.findIndex(x => String(x.webmail_uuid) === String(activeId));
+      if (i >= 0) rows[i].replyStatus = "已回复";
       renderList();
-      if (idx >= 0) renderDetail(rows[idx]);
     });
 
-    seedDates();
+    seedDate();
     loadShops();
-    loadRma();
   </script>
 </body>
 </html>
+
