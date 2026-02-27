@@ -86,6 +86,23 @@ def sync_orders(db: Session = Depends(get_db)):
     return {"job_id": job.id, "status": "queued"}
 
 
+@router.post("/sync-fbm-orders-now")
+def sync_orders_now(db: Session = Depends(get_db)):
+    """
+    同步执行：用于“一键更新订单和状态”立刻拉取最新订单并等待完成。
+    """
+    job = crud.create_import_job(db, "lingxing_fbm")
+    execute_sync_job(job.id)
+    latest = db.query(models.ImportJob).filter(models.ImportJob.id == job.id).first()
+    return {
+        "job_id": job.id,
+        "status": latest.status if latest else "done",
+        "success": latest.success_count if latest else 0,
+        "failed": latest.failed_count if latest else 0,
+        "error_summary": latest.error_summary if latest else "",
+    }
+
+
 @router.get("/sync-fbm-orders")
 def sync_orders_get(db: Session = Depends(get_db)):
     # Convenience endpoint so browser direct open can also trigger sync.

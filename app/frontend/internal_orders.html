@@ -122,7 +122,7 @@
             <button class="btn" id="refreshCodeBtn">刷新产品编码</button>
             <button class="btn" id="pullDetailBtn">拉取订单详情</button>
             <button class="btn" id="enrichAddrBtn">补全买家信息</button>
-            <button class="btn" id="kapiSignBtn">同步卡派签收图</button>
+            <button class="btn" id="kapiSignBtn">签收图改手动上传</button>
             <button class="btn" id="quoteBtn">供应商报价</button>
             <button class="btn" id="batchDeleteBtn" style="background:#dc2626;">批量删除</button>
           </div>
@@ -1262,26 +1262,28 @@
     });
 
     async function triggerFullSyncAndRefresh() {
-      const start = await fetch("/integrations/lingxing/sync-fbm-orders", { method: "POST" });
+      const start = await fetch("/integrations/lingxing/sync-fbm-orders-now", { method: "POST" });
       const j = await start.json().catch(() => ({}));
       if (!start.ok) {
         alert(`启动同步失败: ${j.detail || start.status}`);
         return;
       }
-      const startedAt = Date.now();
-      let done = false;
-      while (!done && (Date.now() - startedAt) < 3 * 60 * 1000) {
-        await new Promise(r => setTimeout(r, 3000));
-        const stRes = await fetch("/integrations/lingxing/sync-status");
-        const st = await stRes.json().catch(() => ({}));
-        const s = String(st?.latest_job?.status || "").toLowerCase();
-        if (s === "done" || s === "failed") done = true;
+      if (String(j.status || "").toLowerCase() === "failed") {
+        alert(`同步失败: ${j.error_summary || "unknown"}`);
+        return;
       }
       try {
         await fetch("/internal-orders/refresh-pending-status", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ only_pending: false }),
+        });
+      } catch (_) {}
+      try {
+        await fetch("/internal-orders/backfill-detail", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ order_ids: [] }),
         });
       } catch (_) {}
       await loadOrders();
@@ -1566,44 +1568,7 @@
     });
 
     document.getElementById("kapiSignBtn").addEventListener("click", async () => {
-      const ids = getSelectedOrderIds();
-      if (!ids.length) {
-        alert("请先勾选订单");
-        return;
-      }
-      const oldKey = localStorage.getItem("kapi_api_key") || "";
-      const oldBase = localStorage.getItem("kapi_base_url") || "https://tran.wedoexpress.com";
-      let apiKey = oldKey;
-      let baseUrl = oldBase;
-      const needPrompt = !apiKey;
-      if (needPrompt) {
-        apiKey = prompt("未检测到本地Api-Key，请输入（也可在配置页保存）", oldKey) || "";
-        if (!apiKey.trim()) {
-          // allow backend config fallback
-          apiKey = "";
-        }
-        baseUrl = prompt("Base URL（留空用配置页）", oldBase) || oldBase;
-      }
-      localStorage.setItem("kapi_api_key", (apiKey || "").trim());
-      localStorage.setItem("kapi_base_url", (baseUrl || "").trim());
-      const res = await fetch("/internal-orders/sync-kapi-sign", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ order_ids: ids, api_key: (apiKey || "").trim(), base_url: (baseUrl || "").trim() }),
-      });
-      const out = await res.json();
-      if (!res.ok || out.detail) {
-        alert(`同步失败: ${JSON.stringify(out)}`);
-        return;
-      }
-      const details = Array.isArray(out.details) ? out.details.slice(0, 5) : [];
-      const miss = Array.isArray(out.missing_examples) ? out.missing_examples.slice(0, 5) : [];
-      alert(
-        `卡派同步完成\n更新: ${out.updated || 0}\n请求单号: ${out.requested || 0}\n缺少卡派后台单号: ${out.missing_kapi_no || 0}` +
-        `${details.length ? `\n示例: ${JSON.stringify(details)}` : ""}` +
-        `${miss.length ? `\n缺少示例: ${JSON.stringify(miss)}` : ""}`
-      );
-      loadOrders();
+      alert("出货图/POD/签收图已改为手动上传，不再通过接口自动同步。");
     });
 
     document.getElementById("clearFilterBtn").addEventListener("click", () => {

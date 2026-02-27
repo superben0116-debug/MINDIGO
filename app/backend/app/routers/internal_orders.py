@@ -2282,8 +2282,6 @@ def sync_kapi_sign(payload: dict, db: Session = Depends(get_db)):
         ext_update = {
             "卡派后台单号": f"{ono}#",
             "orderNo#": f"{ono}#",
-            "POD": pod,
-            "签收图": pod,
             "卡派跟踪号": track,
             "卡派状态": row.get("status"),
             "卡派isReady": row.get("isReady"),
