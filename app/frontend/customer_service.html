@@ -34,6 +34,11 @@
     textarea { width:100%; min-height:110px; border:1px solid var(--line); border-radius:10px; padding:10px; font-size:14px; }
     .tools { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
     .tools button, .tools select { border:1px solid var(--line); border-radius:8px; padding:8px 10px; background:#fff; cursor:pointer; }
+    .debug-modal { position:fixed; inset:0; background:rgba(2,6,23,.48); display:none; align-items:center; justify-content:center; z-index:50; }
+    .debug-card { width:min(1100px,94vw); max-height:86vh; background:#fff; border-radius:12px; border:1px solid var(--line); display:flex; flex-direction:column; }
+    .debug-head { padding:10px 12px; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; align-items:center; }
+    .debug-body { padding:10px 12px; overflow:auto; }
+    .debug-pre { white-space:pre-wrap; word-break:break-word; font:12px/1.5 ui-monospace,Menlo,Consolas,monospace; background:#0b1220; color:#dbeafe; border-radius:8px; padding:12px; }
   </style>
 </head>
 <body>
@@ -53,10 +58,12 @@
       <div class="toolbar">
         <input id="shopFilter" placeholder="店铺名筛选（可选）" />
         <select id="shopSelect" multiple style="min-width:360px; max-width:460px; height:96px;"></select>
+        <input id="manualEmails" placeholder="手动邮箱(逗号分隔，可选)" style="min-width:280px;" />
         <select id="flag"><option value="receive">收件</option><option value="sent">发件</option></select>
         <input id="startDate" type="date" />
         <input id="endDate" type="date" />
         <button id="loadBtn">查询邮件</button>
+        <button id="debugBtn" type="button" style="background:#0f172a;border-color:#0f172a;">调试弹窗</button>
       </div>
       <div class="content">
         <div class="panel list" id="list"></div>
@@ -87,6 +94,20 @@
       </div>
     </div>
   </div>
+  <div class="debug-modal" id="debugModal">
+    <div class="debug-card">
+      <div class="debug-head">
+        <strong>客服调试信息</strong>
+        <div style="display:flex; gap:8px;">
+          <button id="copyDebugBtn" type="button">复制</button>
+          <button id="closeDebugBtn" type="button">关闭</button>
+        </div>
+      </div>
+      <div class="debug-body">
+        <div class="debug-pre" id="debugPre"></div>
+      </div>
+    </div>
+  </div>
   <script>
     const tabsEl = document.getElementById("tabs");
     function openTab(label, url){const tabs=JSON.parse(localStorage.getItem("tabs")||"[]");if(!tabs.find(t=>t.url===url))tabs.push({label,url});localStorage.setItem("tabs",JSON.stringify(tabs));renderTabs(url);}
@@ -103,6 +124,12 @@
     let shops = [];
     let rows = [];
     let activeId = "";
+    const debugTrace = { shops: null, selectedShops: [], mailPayload: null, mailResponse: null, detailPayload: null, detailResponse: null, errors: [] };
+
+    function setDebugTrace(key, value) {
+      debugTrace[key] = value;
+      document.getElementById("debugPre").textContent = JSON.stringify(debugTrace, null, 2);
+    }
 
     function seedDate() {
       const now = new Date();
@@ -115,8 +142,16 @@
     async function loadShops() {
       const r = await fetch("/customer-service/shops");
       const o = await r.json().catch(()=>({}));
-      if (!r.ok || o.detail) { debugEl.textContent = `店铺加载失败: ${JSON.stringify(o.detail || o)}`; return; }
+      setDebugTrace("shops", o);
+      if (!r.ok || o.detail) {
+        const msg = `店铺加载失败: ${JSON.stringify(o.detail || o)}`;
+        debugEl.textContent = msg;
+        debugTrace.errors.push({ stage: "shops", msg, at: new Date().toISOString() });
+        setDebugTrace("errors", debugTrace.errors);
+        return;
+      }
       shops = o.items || [];
+      debugEl.textContent = `店铺加载完成: ${shops.length}；有邮箱: ${shops.filter(x => x.email).length}`;
       renderShopOptions();
     }
 
@@ -157,28 +192,53 @@
       ];
       metaGrid.innerHTML = fields.map(([k,v]) => `<div class="field"><div class="k">${k}</div><div class="v">${v}</div></div>`).join("");
       mailBody.textContent = "详情加载中...";
-      const res = await fetch("/customer-service/mail/detail", { method:"POST", headers:{ "Content-Type":"application/json" }, body:JSON.stringify({ webmail_uuid:r.webmail_uuid }) });
+      const detailPayload = { webmail_uuid:r.webmail_uuid };
+      setDebugTrace("detailPayload", detailPayload);
+      const res = await fetch("/customer-service/mail/detail", { method:"POST", headers:{ "Content-Type":"application/json" }, body:JSON.stringify(detailPayload) });
       const out = await res.json().catch(()=>({}));
-      if (!res.ok || out.detail) { mailBody.textContent = `详情加载失败: ${JSON.stringify(out.detail || out)}`; return; }
+      setDebugTrace("detailResponse", out);
+      if (!res.ok || out.detail) {
+        const msg = `详情加载失败: ${JSON.stringify(out.detail || out)}`;
+        mailBody.textContent = msg;
+        debugTrace.errors.push({ stage: "detail", msg, at: new Date().toISOString() });
+        setDebugTrace("errors", debugTrace.errors);
+        return;
+      }
       const item = out.item || {};
       mailBody.innerHTML = item.text_html || item.text_plain || "(空)";
     }
 
     async function loadMail() {
       const selected = Array.from(shopSelect.selectedOptions || []);
-      const emails = Array.from(new Set(selected.map(x => String(x.dataset.email || "").trim()).filter(Boolean)));
+      const selectedShops = selected.map(x => {
+        const hit = shops.find(s => String(s.sid) === String(x.value));
+        return hit || { sid: x.value, shop_name: x.textContent || "", email: x.dataset.email || "" };
+      });
+      setDebugTrace("selectedShops", selectedShops);
+      const autoEmails = selectedShops.map(x => String(x.email || "").trim()).filter(Boolean);
+      const manualEmails = String(document.getElementById("manualEmails").value || "").replace(/;/g, ",").split(",").map(x => x.trim()).filter(Boolean);
+      const emails = Array.from(new Set([...autoEmails, ...manualEmails]));
       if (!emails.length) { alert("请先选择有绑定邮箱的店铺。"); return; }
       const payload = {
         flag: document.getElementById("flag").value,
         emails,
+        email_text: manualEmails.join(","),
         start_date: document.getElementById("startDate").value,
         end_date: document.getElementById("endDate").value,
         offset: 0,
         length: 100,
       };
+      setDebugTrace("mailPayload", payload);
       const res = await fetch("/customer-service/mail/list", { method:"POST", headers:{ "Content-Type":"application/json" }, body:JSON.stringify(payload) });
       const out = await res.json().catch(()=>({}));
-      if (!res.ok || out.detail) { debugEl.textContent = `查询失败: ${JSON.stringify(out.detail || out)}`; return; }
+      setDebugTrace("mailResponse", out);
+      if (!res.ok || out.detail) {
+        const msg = `查询失败: ${JSON.stringify(out.detail || out)}`;
+        debugEl.textContent = msg;
+        debugTrace.errors.push({ stage: "list", msg, at: new Date().toISOString() });
+        setDebugTrace("errors", debugTrace.errors);
+        return;
+      }
       rows = out.items || [];
       debugEl.textContent = `已抓取: ${rows.length} / 总数: ${out.total || 0} / 邮箱: ${emails.join(",")}${out.debug && out.debug.length ? ` / 调试: ${JSON.stringify(out.debug).slice(0,280)}` : ""}`;
       activeId = rows[0]?.webmail_uuid || "";
@@ -189,6 +249,12 @@
 
     document.getElementById("shopFilter").addEventListener("input", renderShopOptions);
     document.getElementById("loadBtn").addEventListener("click", loadMail);
+    document.getElementById("debugBtn").addEventListener("click", () => { document.getElementById("debugModal").style.display = "flex"; });
+    document.getElementById("closeDebugBtn").addEventListener("click", () => { document.getElementById("debugModal").style.display = "none"; });
+    document.getElementById("copyDebugBtn").addEventListener("click", async () => {
+      const txt = JSON.stringify(debugTrace, null, 2);
+      try { await navigator.clipboard.writeText(txt); alert("调试信息已复制"); } catch { alert("复制失败，请手动复制"); }
+    });
     document.getElementById("tplBtn").addEventListener("click", () => {
       const t = document.getElementById("tplSelect").value;
       const map = {
@@ -213,8 +279,8 @@
     });
 
     seedDate();
+    setDebugTrace("errors", []);
     loadShops();
   </script>
 </body>
 </html>
-

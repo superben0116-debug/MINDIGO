@@ -1101,6 +1101,16 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
             formula_cols_4.discard(ab_col)
             formula_map_3 = {(off, cc): f for (off, cc), f in formula_map_3.items() if cc != ab_col}
             formula_map_4 = {(off, cc): f for (off, cc), f in formula_map_4.items() if cc != ab_col}
+        # 业务规则：BP/BQ/BR（出货图/POD/签收图）不输出模板图片公式，保持空白让用户后续上传
+        suppress_formula_cols = {
+            column_index_from_string("BP"),
+            column_index_from_string("BQ"),
+            column_index_from_string("BR"),
+        }
+        formula_cols_3 -= suppress_formula_cols
+        formula_cols_4 -= suppress_formula_cols
+        formula_map_3 = {(off, cc): f for (off, cc), f in formula_map_3.items() if cc not in suppress_formula_cols}
+        formula_map_4 = {(off, cc): f for (off, cc), f in formula_map_4.items() if cc not in suppress_formula_cols}
         image_anchors = []
         def _merged_anchor(r: int, c: int):
             for mr in ws.merged_cells.ranges:
@@ -1255,6 +1265,12 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
                     ws.cell(rr, cc).value = Translator(f, origin=f"{get_column_letter(cc)}{src_rr}").translate_formula(f"{get_column_letter(cc)}{rr}")
                 except Exception:
                     ws.cell(rr, cc).value = f
+            # 强制修正BD总成本公式：按块行数动态取最后一行的AL，避免4行漏算第4行
+            c_bd = column_index_from_string("BD")
+            if c_bd:
+                r = start_row
+                tail = start_row + block_size - 1
+                ws.cell(r, c_bd).value = f"=Q{r}+AL{r}+BC{r}+AL{tail}"
             # 4行补公式：模板部分共享公式在xml中会丢失，按列规则强制补齐R1-R4
             if use_4:
                 c_ag = header_map.get("头程运费总价")
@@ -1317,6 +1333,10 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
                     if block_size == 4:
                         _clear_cell_force(start_row + 3, image_col)
                         image_anchors.append((start_row + 3, image_col, img_url))
+            # BP/BQ/BR列强制留空（不使用模板中的DISPIMG公式）
+            for rr in range(start_row, start_row + block_size):
+                for cc in suppress_formula_cols:
+                    _clear_cell_force(rr, cc)
             current_row += block_size
 
         # remove trailing empty rows if any

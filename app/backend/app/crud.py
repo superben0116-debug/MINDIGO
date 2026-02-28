@@ -4,6 +4,43 @@ from sqlalchemy.orm import Session
 from app import models
 
 
+_BUYER_STICKY_FIELDS = {
+    "客户地址",
+    "customer_address",
+    "receiver_name",
+    "buyer_name",
+    "customer_name",
+    "receiver_mobile",
+    "receiver_tel",
+    "电话",
+    "buyer_email",
+    "receiver_country_code",
+    "address_line1",
+    "address_line2",
+    "address_line3",
+    "doorplate_no",
+    "district",
+    "city",
+    "state_or_region",
+    "postal_code",
+}
+
+
+def _is_blank_like(value) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        txt = value.strip()
+        if not txt:
+            return True
+        low = txt.lower()
+        if low in {"none", "null", "nan"}:
+            return True
+        if txt in {"None, None", "none, none"}:
+            return True
+    return False
+
+
 def create_internal_order(db: Session, data: Dict, commit: bool = True) -> models.InternalOrder:
     obj = models.InternalOrder(
         internal_order_no=data["internal_order_no"],
@@ -148,7 +185,12 @@ def upsert_order_ext_bulk(db: Session, internal_order_id: int, data: dict):
         # IMPORTANT: JSON columns need reassignment with a new dict object
         # so SQLAlchemy can detect updates reliably on SQLite.
         fields = dict(obj.fields or {})
-        fields.update(data)
+        for k, v in (data or {}).items():
+            # 买家信息字段采用“已抓到就保留”的策略：
+            # 后续同步若返回空/None，不覆盖已有有效值，避免信息丢失。
+            if k in _BUYER_STICKY_FIELDS and _is_blank_like(v) and not _is_blank_like(fields.get(k)):
+                continue
+            fields[k] = v
         obj.fields = fields
         db.commit()
         db.refresh(obj)
