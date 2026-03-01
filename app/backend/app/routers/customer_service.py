@@ -543,6 +543,8 @@ def inbox_list(payload: dict, db: Session = Depends(get_db)):
         debug.append({"stage": "mail", "skipped": True})
 
     if need_site:
+        site_items = []
+        site_total = 0
         sid = _resolve_sid_list(access_token, app_id, cfg, payload.get("sid"))
         start = _to_date(payload.get("startTime")) or _to_date(payload.get("start_date")) or str((datetime.utcnow().date() - timedelta(days=30)))
         end = _to_date(payload.get("endTime")) or _to_date(payload.get("end_date")) or str(datetime.utcnow().date())
@@ -586,9 +588,9 @@ def inbox_list(payload: dict, db: Session = Depends(get_db)):
         if rma.get("code") == 0:
             data = rma.get("data") or {}
             recs = data.get("records") or []
-            total += int(data.get("total") or 0)
+            site_total += int(data.get("total") or 0)
             for r in recs:
-                items.append(
+                site_items.append(
                     {
                         "webmail_uuid": f"RMA-{r.get('id')}",
                         "date": r.get("operationTime") or r.get("createTime"),
@@ -611,6 +613,30 @@ def inbox_list(payload: dict, db: Session = Depends(get_db)):
             debug.append({"stage": "rma", "records": len(recs), "total": data.get("total", 0)})
         else:
             debug.append({"stage": "rma", "error": rma})
+
+        # 站内信回退：若RMA链路为空，则回退到mail/lists收件箱（实际亚马逊站内信通常在此链路）
+        if not site_items:
+            fallback_payload = dict(payload or {})
+            fallback_payload["flag"] = "receive"
+            fallback_payload["emails"] = list(dict.fromkeys(
+                [str(x).strip() for x in (fallback_payload.get("emails") or []) if str(x).strip()] + map_emails
+            ))
+            fallback = _fetch_mail_items(access_token, app_id, fallback_payload)
+            fb_items = fallback.get("items") or []
+            for it in fb_items:
+                it["source"] = "site_mail"
+            site_items.extend(fb_items)
+            site_total += int(fallback.get("total") or 0)
+            debug.append(
+                {
+                    "stage": "site_fallback_mail",
+                    "count": len(fb_items),
+                    "total": fallback.get("total", 0),
+                    "debug": fallback.get("debug", []),
+                }
+            )
+        items.extend(site_items)
+        total += site_total
     else:
         debug.append({"stage": "rma", "skipped": True})
 
