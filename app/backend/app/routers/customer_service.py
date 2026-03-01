@@ -445,3 +445,107 @@ def mail_detail(payload: dict, db: Session = Depends(get_db)):
     if res.get("code") != 0:
         raise HTTPException(status_code=400, detail=res)
     return {"item": res.get("data") or {}}
+
+
+@router.post("/diagnose")
+def customer_service_diagnose(payload: dict, db: Session = Depends(get_db)):
+    """
+    快速诊断客服邮件链路：
+    1) 配置是否存在
+    2) token是否可获取
+    3) 店铺列表是否可读
+    4) 邮件接口(sent/receive)是否返回数据
+    """
+    out = {
+        "ok": False,
+        "steps": [],
+        "emails": [],
+    }
+    try:
+        cfg = get_lingxing_config(db)
+        app_id = str(cfg.get("app_id") or "").strip()
+        app_secret = str(cfg.get("app_secret") or "").strip()
+        out["steps"].append(
+            {
+                "stage": "config",
+                "app_id_set": bool(app_id),
+                "app_secret_set": bool(app_secret),
+                "sid_list": str(cfg.get("sid_list") or "ALL"),
+            }
+        )
+        if not app_id or not app_secret:
+            return out
+
+        token = get_access_token(app_id, app_secret)
+        out["steps"].append({"stage": "token", "code": token.get("code"), "message": token.get("message")})
+        if token.get("code") not in (200, "200"):
+            return out
+        access_token = token.get("data", {}).get("access_token")
+        if not access_token:
+            out["steps"].append({"stage": "token", "error": "missing access_token"})
+            return out
+
+        shops = get_shop_list(access_token, app_id)
+        shop_data = shops.get("data") or []
+        if isinstance(shop_data, dict):
+            shop_data = shop_data.get("list") or shop_data.get("records") or shop_data.get("items") or []
+        out["steps"].append(
+            {
+                "stage": "shops",
+                "code": shops.get("code"),
+                "count": len(shop_data) if isinstance(shop_data, list) else 0,
+                "sample_keys": list(shop_data[0].keys()) if isinstance(shop_data, list) and shop_data else [],
+            }
+        )
+        if shops.get("code") != 0:
+            return out
+
+        emails = payload.get("emails") or []
+        emails = [str(x).strip() for x in emails if str(x).strip()]
+        if not emails:
+            # 自动从店铺提取前5个邮箱做诊断
+            seen = set()
+            for s in (shop_data if isinstance(shop_data, list) else []):
+                if not isinstance(s, dict):
+                    continue
+                em = _extract_shop_email(s)
+                if em and em not in seen:
+                    emails.append(em)
+                    seen.add(em)
+                if len(emails) >= 5:
+                    break
+        out["emails"] = emails
+        if not emails:
+            out["steps"].append({"stage": "email_pick", "error": "no email found in shops"})
+            return out
+
+        start_date = _to_date(payload.get("start_date")) or str((datetime.utcnow() - timedelta(days=7)).date())
+        end_date = _to_date(payload.get("end_date")) or str(datetime.utcnow().date())
+        for em in emails:
+            for flag in ("receive", "sent"):
+                body = {
+                    "flag": flag,
+                    "email": em,
+                    "start_date": start_date,
+                    "end_date": end_date,
+                    "offset": 0,
+                    "length": 20,
+                }
+                rs = get_mail_list(access_token, app_id, body)
+                out["steps"].append(
+                    {
+                        "stage": "mail_list",
+                        "flag": flag,
+                        "email": em,
+                        "code": rs.get("code"),
+                        "message": rs.get("message"),
+                        "count": len(rs.get("data") or []) if isinstance(rs.get("data"), list) else 0,
+                        "total": rs.get("total", 0),
+                        "request": body,
+                    }
+                )
+        out["ok"] = True
+        return out
+    except Exception as e:
+        out["steps"].append({"stage": "exception", "error": str(e)})
+        return out

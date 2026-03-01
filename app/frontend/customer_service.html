@@ -63,6 +63,7 @@
         <input id="startDate" type="date" />
         <input id="endDate" type="date" />
         <button id="loadBtn">查询邮件</button>
+        <button id="diagBtn" type="button" style="background:#7c3aed;border-color:#7c3aed;">链路诊断</button>
         <button id="debugBtn" type="button" style="background:#0f172a;border-color:#0f172a;">调试弹窗</button>
       </div>
       <div class="content">
@@ -247,8 +248,39 @@
       else { metaGrid.innerHTML = ""; mailBody.textContent = "暂无邮件"; }
     }
 
+    async function runDiagnose() {
+      const selected = Array.from(shopSelect.selectedOptions || []);
+      const selectedShops = selected.map(x => {
+        const hit = shops.find(s => String(s.sid) === String(x.value));
+        return hit || { sid: x.value, shop_name: x.textContent || "", email: x.dataset.email || "" };
+      });
+      const autoEmails = selectedShops.map(x => String(x.email || "").trim()).filter(Boolean);
+      const manualEmails = String(document.getElementById("manualEmails").value || "").replace(/;/g, ",").split(",").map(x => x.trim()).filter(Boolean);
+      const emails = Array.from(new Set([...autoEmails, ...manualEmails]));
+      const payload = {
+        emails,
+        start_date: document.getElementById("startDate").value,
+        end_date: document.getElementById("endDate").value,
+      };
+      setDebugTrace("diagnosePayload", payload);
+      const res = await fetch("/customer-service/diagnose", { method:"POST", headers:{ "Content-Type":"application/json" }, body:JSON.stringify(payload) });
+      const out = await res.json().catch(()=>({}));
+      setDebugTrace("diagnoseResponse", out);
+      document.getElementById("debugModal").style.display = "flex";
+      if (!res.ok || out.detail) {
+        const msg = `链路诊断失败: ${JSON.stringify(out.detail || out)}`;
+        debugEl.textContent = msg;
+        debugTrace.errors.push({ stage: "diagnose", msg, at: new Date().toISOString() });
+        setDebugTrace("errors", debugTrace.errors);
+        return;
+      }
+      const stepCount = Array.isArray(out.steps) ? out.steps.length : 0;
+      debugEl.textContent = `链路诊断完成: ok=${!!out.ok} / steps=${stepCount}`;
+    }
+
     document.getElementById("shopFilter").addEventListener("input", renderShopOptions);
     document.getElementById("loadBtn").addEventListener("click", loadMail);
+    document.getElementById("diagBtn").addEventListener("click", runDiagnose);
     document.getElementById("debugBtn").addEventListener("click", () => { document.getElementById("debugModal").style.display = "flex"; });
     document.getElementById("closeDebugBtn").addEventListener("click", () => { document.getElementById("debugModal").style.display = "none"; });
     document.getElementById("copyDebugBtn").addEventListener("click", async () => {
