@@ -476,15 +476,38 @@ def inbox_list(payload: dict, db: Session = Depends(get_db)):
         "searchTimeFiled": str(payload.get("searchTimeFiled") or "operationTime"),
         "startTime": start,
         "endTime": end,
-        "searchValue": payload.get("searchValue") or [""],
-        "searchField": str(payload.get("searchField") or "msku"),
         "sortColumn": str(payload.get("sortColumn") or "operationTime"),
         "sortType": str(payload.get("sortType") or "desc"),
         "pageNum": int(payload.get("pageNum") or 1),
-        "pageSize": int(payload.get("pageSize") or 50),
+        "pageSize": int(payload.get("pageSize") or 100),
     }
+    search_values = payload.get("searchValue")
+    search_field = str(payload.get("searchField") or "").strip()
+    if isinstance(search_values, list):
+        clean_vals = [str(x).strip() for x in search_values if str(x).strip()]
+        if clean_vals and search_field:
+            req["searchValue"] = clean_vals
+            req["searchField"] = search_field
     rma = get_rma_manage_list(access_token, app_id, req)
-    debug.append({"stage": "rma", "request": req, "code": rma.get("code"), "message": rma.get("message")})
+    debug.append({"stage": "rma", "attempt": 1, "request": req, "code": rma.get("code"), "message": rma.get("message")})
+    # 回退1：若无数据，改用创建时间维度重试
+    if rma.get("code") == 0 and int((rma.get("data") or {}).get("total") or 0) == 0:
+        req2 = dict(req)
+        req2["searchTimeFiled"] = "createTime"
+        req2["sortColumn"] = "createTime"
+        rma2 = get_rma_manage_list(access_token, app_id, req2)
+        debug.append({"stage": "rma", "attempt": 2, "request": req2, "code": rma2.get("code"), "message": rma2.get("message")})
+        if rma2.get("code") == 0 and int((rma2.get("data") or {}).get("total") or 0) > 0:
+            rma = rma2
+    # 回退2：若仍无数据，扩大时间窗到最近60天重试
+    if rma.get("code") == 0 and int((rma.get("data") or {}).get("total") or 0) == 0:
+        req3 = dict(req)
+        req3["startTime"] = str((datetime.utcnow().date() - timedelta(days=60)))
+        req3["endTime"] = str(datetime.utcnow().date())
+        rma3 = get_rma_manage_list(access_token, app_id, req3)
+        debug.append({"stage": "rma", "attempt": 3, "request": req3, "code": rma3.get("code"), "message": rma3.get("message")})
+        if rma3.get("code") == 0 and int((rma3.get("data") or {}).get("total") or 0) > 0:
+            rma = rma3
     if rma.get("code") == 0:
         data = rma.get("data") or {}
         recs = data.get("records") or []
