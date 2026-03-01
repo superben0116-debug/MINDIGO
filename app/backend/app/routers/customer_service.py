@@ -145,6 +145,101 @@ def _extract_shop_email(s: dict) -> str:
     return _extract_email_like(s)
 
 
+def _resolve_sid_list(access_token: str, app_id: str, cfg: dict, sid_payload) -> list[int]:
+    sid = sid_payload or []
+    if isinstance(sid, (str, int)):
+        sid = [sid]
+    out = [int(x) for x in sid if str(x).strip().isdigit()]
+    if out:
+        return out
+    sid_list_cfg = str(cfg.get("sid_list") or "").strip()
+    if sid_list_cfg and sid_list_cfg.upper() != "ALL":
+        out = [int(x.strip()) for x in sid_list_cfg.split(",") if x.strip().isdigit()]
+        if out:
+            return out
+    shops = get_shop_list(access_token, app_id)
+    rows = shops.get("data") or []
+    if isinstance(rows, dict):
+        rows = rows.get("list") or rows.get("records") or rows.get("items") or []
+    return [int(s.get("sid")) for s in (rows or []) if isinstance(s, dict) and str(s.get("sid") or "").isdigit()]
+
+
+def _fetch_mail_items(access_token: str, app_id: str, payload: dict):
+    emails = payload.get("emails") or []
+    emails = [str(x).strip() for x in emails if str(x).strip()]
+    if not emails:
+        manual = str(payload.get("email_text") or "").strip()
+        if manual:
+            emails = [x.strip() for x in manual.replace(";", ",").split(",") if x.strip()]
+    if not emails:
+        return {"total": 0, "items": [], "debug": [{"stage": "mail", "error": "missing emails"}]}
+
+    start_date = _to_date(payload.get("start_date")) or _to_date(payload.get("startTime"))
+    end_date = _to_date(payload.get("end_date")) or _to_date(payload.get("endTime"))
+    flag = str(payload.get("flag") or "receive").strip()
+    offset = int(payload.get("offset") or 0)
+    length = int(payload.get("length") or 50)
+
+    items = []
+    total = 0
+    sent_subjects = set()
+    debug = []
+
+    for em in emails:
+        body_sent = {
+            "flag": "sent",
+            "email": em,
+            "start_date": start_date,
+            "end_date": end_date,
+            "offset": 0,
+            "length": max(length, 100),
+        }
+        rs = get_mail_list(access_token, app_id, body_sent)
+        if rs.get("code") == 0:
+            debug.append({"email": em, "stage": "sent", "count": len(rs.get("data") or []), "total": rs.get("total", 0)})
+            for r in (rs.get("data") or []):
+                sub = str(r.get("subject") or "").strip().lower()
+                if sub:
+                    sent_subjects.add(sub)
+        else:
+            debug.append({"email": em, "stage": "sent", "error": rs})
+
+    for em in emails:
+        body = {
+            "flag": flag,
+            "email": em,
+            "start_date": start_date,
+            "end_date": end_date,
+            "offset": offset,
+            "length": length,
+        }
+        res = get_mail_list(access_token, app_id, body)
+        if res.get("code") != 0:
+            debug.append({"email": em, "stage": "list", "error": res})
+            continue
+        debug.append({"email": em, "stage": "list", "count": len(res.get("data") or []), "total": res.get("total", 0)})
+        total += int(res.get("total") or 0)
+        for r in (res.get("data") or []):
+            subject = str(r.get("subject") or "")
+            reply_status = "已回复" if subject.strip().lower() in sent_subjects else ("已回复" if flag == "sent" else "待回复")
+            items.append(
+                {
+                    "webmail_uuid": r.get("webmail_uuid"),
+                    "date": r.get("date"),
+                    "subject": subject,
+                    "from_name": r.get("from_name"),
+                    "from_address": r.get("from_address"),
+                    "to_name": r.get("to_name"),
+                    "to_address": r.get("to_address"),
+                    "has_attachment": r.get("has_attachment"),
+                    "email": em,
+                    "replyStatus": reply_status,
+                    "source": "mail",
+                }
+            )
+    return {"total": total, "items": items, "debug": debug}
+
+
 @router.post("/rma/list")
 def rma_list(payload: dict, db: Session = Depends(get_db)):
     cfg = get_lingxing_config(db)
@@ -351,78 +446,74 @@ def mail_list(payload: dict, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail=str(token))
     access_token = token.get("data", {}).get("access_token")
 
-    emails = payload.get("emails") or []
-    emails = [str(x).strip() for x in emails if str(x).strip()]
-    if not emails:
-        manual = str(payload.get("email_text") or "").strip()
-        if manual:
-            emails = [x.strip() for x in manual.replace(";", ",").split(",") if x.strip()]
-    if not emails:
-        raise HTTPException(status_code=400, detail="missing emails (or email_text)")
+    out = _fetch_mail_items(access_token, app_id, payload)
+    out["items"].sort(key=lambda x: str(x.get("date") or ""), reverse=True)
+    return out
 
-    start_date = _to_date(payload.get("start_date")) or _to_date(payload.get("startTime"))
-    end_date = _to_date(payload.get("end_date")) or _to_date(payload.get("endTime"))
-    flag = str(payload.get("flag") or "receive").strip()
-    offset = int(payload.get("offset") or 0)
-    length = int(payload.get("length") or 50)
 
-    items = []
-    total = 0
-    sent_subjects = set()
-    debug = []
+@router.post("/inbox/list")
+def inbox_list(payload: dict, db: Session = Depends(get_db)):
+    cfg = get_lingxing_config(db)
+    app_id = str(cfg.get("app_id") or "").strip()
+    app_secret = str(cfg.get("app_secret") or "").strip()
+    if not app_id or not app_secret:
+        raise HTTPException(status_code=400, detail="missing app_id/app_secret")
+    token = get_access_token(app_id, app_secret)
+    if token.get("code") not in (200, "200"):
+        raise HTTPException(status_code=400, detail=str(token))
+    access_token = token.get("data", {}).get("access_token")
 
-    # 先取 sent，建立“已回复”对照
-    for em in emails:
-        body_sent = {
-            "flag": "sent",
-            "email": em,
-            "start_date": start_date,
-            "end_date": end_date,
-            "offset": 0,
-            "length": max(length, 100),
-        }
-        rs = get_mail_list(access_token, app_id, body_sent)
-        if rs.get("code") == 0:
-            debug.append({"email": em, "stage": "sent", "count": len(rs.get("data") or []), "total": rs.get("total", 0)})
-            for r in (rs.get("data") or []):
-                sub = str(r.get("subject") or "").strip().lower()
-                if sub:
-                    sent_subjects.add(sub)
-        else:
-            debug.append({"email": em, "stage": "sent", "error": rs})
+    mail_out = _fetch_mail_items(access_token, app_id, payload)
+    items = list(mail_out.get("items") or [])
+    debug = [{"stage": "mail", "summary": {"count": len(items), "total": mail_out.get("total", 0), "debug": mail_out.get("debug", [])}}]
+    total = int(mail_out.get("total") or 0)
 
-    for em in emails:
-        body = {
-            "flag": flag,
-            "email": em,
-            "start_date": start_date,
-            "end_date": end_date,
-            "offset": offset,
-            "length": length,
-        }
-        res = get_mail_list(access_token, app_id, body)
-        if res.get("code") != 0:
-            debug.append({"email": em, "stage": "list", "error": res})
-            continue
-        debug.append({"email": em, "stage": "list", "count": len(res.get("data") or []), "total": res.get("total", 0)})
-        total += int(res.get("total") or 0)
-        for r in (res.get("data") or []):
-            subject = str(r.get("subject") or "")
-            reply_status = "已回复" if subject.strip().lower() in sent_subjects else ("已回复" if flag == "sent" else "待回复")
+    sid = _resolve_sid_list(access_token, app_id, cfg, payload.get("sid"))
+    start = _to_date(payload.get("startTime")) or _to_date(payload.get("start_date")) or str((datetime.utcnow().date() - timedelta(days=30)))
+    end = _to_date(payload.get("endTime")) or _to_date(payload.get("end_date")) or str(datetime.utcnow().date())
+    req = {
+        "sid": sid,
+        "searchTimeFiled": str(payload.get("searchTimeFiled") or "operationTime"),
+        "startTime": start,
+        "endTime": end,
+        "searchValue": payload.get("searchValue") or [""],
+        "searchField": str(payload.get("searchField") or "msku"),
+        "sortColumn": str(payload.get("sortColumn") or "operationTime"),
+        "sortType": str(payload.get("sortType") or "desc"),
+        "pageNum": int(payload.get("pageNum") or 1),
+        "pageSize": int(payload.get("pageSize") or 50),
+    }
+    rma = get_rma_manage_list(access_token, app_id, req)
+    debug.append({"stage": "rma", "request": req, "code": rma.get("code"), "message": rma.get("message")})
+    if rma.get("code") == 0:
+        data = rma.get("data") or {}
+        recs = data.get("records") or []
+        total += int(data.get("total") or 0)
+        for r in recs:
             items.append(
                 {
-                    "webmail_uuid": r.get("webmail_uuid"),
-                    "date": r.get("date"),
-                    "subject": subject,
-                    "from_name": r.get("from_name"),
-                    "from_address": r.get("from_address"),
-                    "to_name": r.get("to_name"),
-                    "to_address": r.get("to_address"),
-                    "has_attachment": r.get("has_attachment"),
-                    "email": em,
-                    "replyStatus": reply_status,
+                    "webmail_uuid": f"RMA-{r.get('id')}",
+                    "date": r.get("operationTime") or r.get("createTime"),
+                    "subject": r.get("itemName") or f"RMA {r.get('rmaNo') or ''}".strip(),
+                    "from_name": r.get("sellerName") or "",
+                    "from_address": "",
+                    "to_name": r.get("buyerName") or "",
+                    "to_address": r.get("buyerEmail") or "",
+                    "has_attachment": 0,
+                    "email": "",
+                    "replyStatus": _status_text(r),
+                    "source": "rma",
+                    "body": (r.get("remark") or "").strip() or (r.get("itemName") or ""),
+                    "rmaNo": r.get("rmaNo"),
+                    "amazonOrderId": r.get("amazonOrderId"),
+                    "shopName": _map_shop_name(r.get("sellerName")),
+                    "channelSourceName": r.get("channelSourceName"),
                 }
             )
+        debug.append({"stage": "rma", "records": len(recs), "total": data.get("total", 0)})
+    else:
+        debug.append({"stage": "rma", "error": rma})
+
     items.sort(key=lambda x: str(x.get("date") or ""), reverse=True)
     return {"total": total, "items": items, "debug": debug}
 

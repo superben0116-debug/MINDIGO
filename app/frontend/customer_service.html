@@ -192,6 +192,10 @@
         ["邮箱", r.email || "-"],
       ];
       metaGrid.innerHTML = fields.map(([k,v]) => `<div class="field"><div class="k">${k}</div><div class="v">${v}</div></div>`).join("");
+      if (String(r.source || "") === "rma") {
+        mailBody.textContent = r.body || "(RMA无详情内容)";
+        return;
+      }
       mailBody.textContent = "详情加载中...";
       const detailPayload = { webmail_uuid:r.webmail_uuid };
       setDebugTrace("detailPayload", detailPayload);
@@ -224,13 +228,14 @@
         flag: document.getElementById("flag").value,
         emails,
         email_text: manualEmails.join(","),
+        sid: selectedShops.map(x => Number(x.sid || 0)).filter(x => Number.isFinite(x) && x > 0),
         start_date: document.getElementById("startDate").value,
         end_date: document.getElementById("endDate").value,
         offset: 0,
         length: 100,
       };
       setDebugTrace("mailPayload", payload);
-      const res = await fetch("/customer-service/mail/list", { method:"POST", headers:{ "Content-Type":"application/json" }, body:JSON.stringify(payload) });
+      const res = await fetch("/customer-service/inbox/list", { method:"POST", headers:{ "Content-Type":"application/json" }, body:JSON.stringify(payload) });
       const out = await res.json().catch(()=>({}));
       setDebugTrace("mailResponse", out);
       if (!res.ok || out.detail) {
