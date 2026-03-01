@@ -164,7 +164,7 @@
         const op = document.createElement("option");
         op.value = String(s.sid);
         op.dataset.email = s.email || "";
-        op.textContent = `${s.shop_name || s.sid}${s.email ? ` · ${s.email}` : " · (无邮箱)"}`;
+        op.textContent = `${s.shop_name || s.sid} [SID:${s.sid}]${s.country ? ` · ${s.country}` : ""}${s.email ? ` · ${s.email}` : " · (无邮箱)"}`;
         shopSelect.appendChild(op);
       });
     }
@@ -220,15 +220,16 @@
         return hit || { sid: x.value, shop_name: x.textContent || "", email: x.dataset.email || "" };
       });
       setDebugTrace("selectedShops", selectedShops);
+      const sidList = selectedShops.map(x => Number(x.sid || 0)).filter(x => Number.isFinite(x) && x > 0);
       const autoEmails = selectedShops.map(x => String(x.email || "").trim()).filter(Boolean);
       const manualEmails = String(document.getElementById("manualEmails").value || "").replace(/;/g, ",").split(",").map(x => x.trim()).filter(Boolean);
       const emails = Array.from(new Set([...autoEmails, ...manualEmails]));
-      if (!emails.length) { alert("请先选择有绑定邮箱的店铺。"); return; }
+      if (!sidList.length && !emails.length) { alert("请先选择店铺，或手动填写邮箱。"); return; }
       const payload = {
         flag: document.getElementById("flag").value,
         emails,
         email_text: manualEmails.join(","),
-        sid: selectedShops.map(x => Number(x.sid || 0)).filter(x => Number.isFinite(x) && x > 0),
+        sid: sidList,
         start_date: document.getElementById("startDate").value,
         end_date: document.getElementById("endDate").value,
         offset: 0,
@@ -246,7 +247,7 @@
         return;
       }
       rows = out.items || [];
-      debugEl.textContent = `已抓取: ${rows.length} / 总数: ${out.total || 0} / 邮箱: ${emails.join(",")}${out.debug && out.debug.length ? ` / 调试: ${JSON.stringify(out.debug).slice(0,280)}` : ""}`;
+      debugEl.textContent = `已抓取: ${rows.length} / 总数: ${out.total || 0} / SID: ${sidList.join(",") || "-"} / 邮箱: ${emails.join(",") || "-"}${out.debug && out.debug.length ? ` / 调试: ${JSON.stringify(out.debug).slice(0,280)}` : ""}`;
       activeId = rows[0]?.webmail_uuid || "";
       renderList();
       if (rows[0]) loadDetail(rows[0]);
