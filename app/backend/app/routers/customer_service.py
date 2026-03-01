@@ -520,84 +520,99 @@ def inbox_list(payload: dict, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail=str(token))
     access_token = token.get("data", {}).get("access_token")
 
+    source_type = str(payload.get("source_type") or "all").strip().lower()  # all|site|mail
+    need_mail = source_type in ("all", "mail")
+    need_site = source_type in ("all", "site")
+
     sid_input = [int(x) for x in (payload.get("sid") or []) if str(x).strip().isdigit()]
     map_emails = _emails_from_map(cfg, sid_list=sid_input, shop_names=payload.get("shop_names") or [])
-    merged_payload = dict(payload or {})
-    emails = [str(x).strip() for x in (merged_payload.get("emails") or []) if str(x).strip()]
-    merged_payload["emails"] = list(dict.fromkeys(emails + map_emails))
-    mail_out = _fetch_mail_items(access_token, app_id, merged_payload)
-    items = list(mail_out.get("items") or [])
-    debug = [{"stage": "mail", "summary": {"count": len(items), "total": mail_out.get("total", 0), "debug": mail_out.get("debug", []), "map_emails": map_emails}}]
-    total = int(mail_out.get("total") or 0)
+    items = []
+    total = 0
+    debug = [{"stage": "mode", "source_type": source_type, "need_mail": need_mail, "need_site": need_site}]
 
-    sid = _resolve_sid_list(access_token, app_id, cfg, payload.get("sid"))
-    start = _to_date(payload.get("startTime")) or _to_date(payload.get("start_date")) or str((datetime.utcnow().date() - timedelta(days=30)))
-    end = _to_date(payload.get("endTime")) or _to_date(payload.get("end_date")) or str(datetime.utcnow().date())
-    req = {
-        "sid": sid,
-        "searchTimeFiled": str(payload.get("searchTimeFiled") or "operationTime"),
-        "startTime": start,
-        "endTime": end,
-        "sortColumn": str(payload.get("sortColumn") or "operationTime"),
-        "sortType": str(payload.get("sortType") or "desc"),
-        "pageNum": int(payload.get("pageNum") or 1),
-        "pageSize": int(payload.get("pageSize") or 100),
-    }
-    search_values = payload.get("searchValue")
-    search_field = str(payload.get("searchField") or "").strip()
-    if isinstance(search_values, list):
-        clean_vals = [str(x).strip() for x in search_values if str(x).strip()]
-        if clean_vals and search_field:
-            req["searchValue"] = clean_vals
-            req["searchField"] = search_field
-    rma = get_rma_manage_list(access_token, app_id, req)
-    debug.append({"stage": "rma", "attempt": 1, "request": req, "code": rma.get("code"), "message": rma.get("message")})
-    # 回退1：若无数据，改用创建时间维度重试
-    if rma.get("code") == 0 and int((rma.get("data") or {}).get("total") or 0) == 0:
-        req2 = dict(req)
-        req2["searchTimeFiled"] = "createTime"
-        req2["sortColumn"] = "createTime"
-        rma2 = get_rma_manage_list(access_token, app_id, req2)
-        debug.append({"stage": "rma", "attempt": 2, "request": req2, "code": rma2.get("code"), "message": rma2.get("message")})
-        if rma2.get("code") == 0 and int((rma2.get("data") or {}).get("total") or 0) > 0:
-            rma = rma2
-    # 回退2：若仍无数据，扩大时间窗到最近60天重试
-    if rma.get("code") == 0 and int((rma.get("data") or {}).get("total") or 0) == 0:
-        req3 = dict(req)
-        req3["startTime"] = str((datetime.utcnow().date() - timedelta(days=60)))
-        req3["endTime"] = str(datetime.utcnow().date())
-        rma3 = get_rma_manage_list(access_token, app_id, req3)
-        debug.append({"stage": "rma", "attempt": 3, "request": req3, "code": rma3.get("code"), "message": rma3.get("message")})
-        if rma3.get("code") == 0 and int((rma3.get("data") or {}).get("total") or 0) > 0:
-            rma = rma3
-    if rma.get("code") == 0:
-        data = rma.get("data") or {}
-        recs = data.get("records") or []
-        total += int(data.get("total") or 0)
-        for r in recs:
-            items.append(
-                {
-                    "webmail_uuid": f"RMA-{r.get('id')}",
-                    "date": r.get("operationTime") or r.get("createTime"),
-                    "subject": r.get("itemName") or f"RMA {r.get('rmaNo') or ''}".strip(),
-                    "from_name": r.get("sellerName") or "",
-                    "from_address": "",
-                    "to_name": r.get("buyerName") or "",
-                    "to_address": r.get("buyerEmail") or "",
-                    "has_attachment": 0,
-                    "email": "",
-                    "replyStatus": _status_text(r),
-                    "source": "rma",
-                    "body": (r.get("remark") or "").strip() or (r.get("itemName") or ""),
-                    "rmaNo": r.get("rmaNo"),
-                    "amazonOrderId": r.get("amazonOrderId"),
-                    "shopName": _map_shop_name(r.get("sellerName")),
-                    "channelSourceName": r.get("channelSourceName"),
-                }
-            )
-        debug.append({"stage": "rma", "records": len(recs), "total": data.get("total", 0)})
+    if need_mail:
+        merged_payload = dict(payload or {})
+        emails = [str(x).strip() for x in (merged_payload.get("emails") or []) if str(x).strip()]
+        merged_payload["emails"] = list(dict.fromkeys(emails + map_emails))
+        mail_out = _fetch_mail_items(access_token, app_id, merged_payload)
+        mail_items = list(mail_out.get("items") or [])
+        items.extend(mail_items)
+        total += int(mail_out.get("total") or 0)
+        debug.append({"stage": "mail", "summary": {"count": len(mail_items), "total": mail_out.get("total", 0), "debug": mail_out.get("debug", []), "map_emails": map_emails}})
     else:
-        debug.append({"stage": "rma", "error": rma})
+        debug.append({"stage": "mail", "skipped": True})
+
+    if need_site:
+        sid = _resolve_sid_list(access_token, app_id, cfg, payload.get("sid"))
+        start = _to_date(payload.get("startTime")) or _to_date(payload.get("start_date")) or str((datetime.utcnow().date() - timedelta(days=30)))
+        end = _to_date(payload.get("endTime")) or _to_date(payload.get("end_date")) or str(datetime.utcnow().date())
+        req = {
+            "sid": sid,
+            "searchTimeFiled": str(payload.get("searchTimeFiled") or "operationTime"),
+            "startTime": start,
+            "endTime": end,
+            "sortColumn": str(payload.get("sortColumn") or "operationTime"),
+            "sortType": str(payload.get("sortType") or "desc"),
+            "pageNum": int(payload.get("pageNum") or 1),
+            "pageSize": int(payload.get("pageSize") or 100),
+        }
+        search_values = payload.get("searchValue")
+        search_field = str(payload.get("searchField") or "").strip()
+        if isinstance(search_values, list):
+            clean_vals = [str(x).strip() for x in search_values if str(x).strip()]
+            if clean_vals and search_field:
+                req["searchValue"] = clean_vals
+                req["searchField"] = search_field
+        rma = get_rma_manage_list(access_token, app_id, req)
+        debug.append({"stage": "rma", "attempt": 1, "request": req, "code": rma.get("code"), "message": rma.get("message")})
+        # 回退1：若无数据，改用创建时间维度重试
+        if rma.get("code") == 0 and int((rma.get("data") or {}).get("total") or 0) == 0:
+            req2 = dict(req)
+            req2["searchTimeFiled"] = "createTime"
+            req2["sortColumn"] = "createTime"
+            rma2 = get_rma_manage_list(access_token, app_id, req2)
+            debug.append({"stage": "rma", "attempt": 2, "request": req2, "code": rma2.get("code"), "message": rma2.get("message")})
+            if rma2.get("code") == 0 and int((rma2.get("data") or {}).get("total") or 0) > 0:
+                rma = rma2
+        # 回退2：若仍无数据，扩大时间窗到最近60天重试
+        if rma.get("code") == 0 and int((rma.get("data") or {}).get("total") or 0) == 0:
+            req3 = dict(req)
+            req3["startTime"] = str((datetime.utcnow().date() - timedelta(days=60)))
+            req3["endTime"] = str(datetime.utcnow().date())
+            rma3 = get_rma_manage_list(access_token, app_id, req3)
+            debug.append({"stage": "rma", "attempt": 3, "request": req3, "code": rma3.get("code"), "message": rma3.get("message")})
+            if rma3.get("code") == 0 and int((rma3.get("data") or {}).get("total") or 0) > 0:
+                rma = rma3
+        if rma.get("code") == 0:
+            data = rma.get("data") or {}
+            recs = data.get("records") or []
+            total += int(data.get("total") or 0)
+            for r in recs:
+                items.append(
+                    {
+                        "webmail_uuid": f"RMA-{r.get('id')}",
+                        "date": r.get("operationTime") or r.get("createTime"),
+                        "subject": r.get("itemName") or f"RMA {r.get('rmaNo') or ''}".strip(),
+                        "from_name": r.get("sellerName") or "",
+                        "from_address": "",
+                        "to_name": r.get("buyerName") or "",
+                        "to_address": r.get("buyerEmail") or "",
+                        "has_attachment": 0,
+                        "email": "",
+                        "replyStatus": _status_text(r),
+                        "source": "rma",
+                        "body": (r.get("remark") or "").strip() or (r.get("itemName") or ""),
+                        "rmaNo": r.get("rmaNo"),
+                        "amazonOrderId": r.get("amazonOrderId"),
+                        "shopName": _map_shop_name(r.get("sellerName")),
+                        "channelSourceName": r.get("channelSourceName"),
+                    }
+                )
+            debug.append({"stage": "rma", "records": len(recs), "total": data.get("total", 0)})
+        else:
+            debug.append({"stage": "rma", "error": rma})
+    else:
+        debug.append({"stage": "rma", "skipped": True})
 
     items.sort(key=lambda x: str(x.get("date") or ""), reverse=True)
     return {"total": total, "items": items, "debug": debug}
