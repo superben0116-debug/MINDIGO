@@ -38,6 +38,7 @@ def default_lingxing_config() -> Dict:
         "use_mws_orders": 1,
         "listing_api_path": "/erp/sc/data/mws/listing",
         "listing_sid": "101",
+        "customer_mail_map": {},  # { "5448": "xxx@163.com", "口福轩": "yyy@163.com" }
     }
 
 

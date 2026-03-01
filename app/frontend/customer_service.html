@@ -64,6 +64,7 @@
         <input id="endDate" type="date" />
         <button id="loadBtn">查询邮件</button>
         <button id="diagBtn" type="button" style="background:#7c3aed;border-color:#7c3aed;">链路诊断</button>
+        <button id="mapBtn" type="button" style="background:#ea580c;border-color:#ea580c;">店铺邮箱映射</button>
         <button id="debugBtn" type="button" style="background:#0f172a;border-color:#0f172a;">调试弹窗</button>
       </div>
       <div class="content">
@@ -230,6 +231,7 @@
         emails,
         email_text: manualEmails.join(","),
         sid: sidList,
+        shop_names: selectedShops.map(x => String(x.shop_name || "").trim()).filter(Boolean),
         start_date: document.getElementById("startDate").value,
         end_date: document.getElementById("endDate").value,
         offset: 0,
@@ -265,6 +267,7 @@
       const emails = Array.from(new Set([...autoEmails, ...manualEmails]));
       const payload = {
         emails,
+        shop_names: selectedShops.map(x => String(x.shop_name || "").trim()).filter(Boolean),
         start_date: document.getElementById("startDate").value,
         end_date: document.getElementById("endDate").value,
       };
@@ -287,6 +290,19 @@
     document.getElementById("shopFilter").addEventListener("input", renderShopOptions);
     document.getElementById("loadBtn").addEventListener("click", loadMail);
     document.getElementById("diagBtn").addEventListener("click", runDiagnose);
+    document.getElementById("mapBtn").addEventListener("click", async () => {
+      const tip = '请输入JSON映射，例如 {\"5448\":\"hangm2021@163.com\",\"口福轩\":\"hangm2021@163.com\"}';
+      const txt = window.prompt(tip, '{}');
+      if (!txt) return;
+      let mapping = {};
+      try { mapping = JSON.parse(txt); } catch { alert("JSON格式错误"); return; }
+      const res = await fetch('/customer-service/mail-map', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ mapping }) });
+      const out = await res.json().catch(()=>({}));
+      setDebugTrace("mailMapSaveResponse", out);
+      if (!res.ok || out.detail) { alert(`保存失败: ${JSON.stringify(out.detail || out)}`); return; }
+      alert(`已保存映射: ${out.count || 0}`);
+      await loadShops();
+    });
     document.getElementById("debugBtn").addEventListener("click", () => { document.getElementById("debugModal").style.display = "flex"; });
     document.getElementById("closeDebugBtn").addEventListener("click", () => { document.getElementById("debugModal").style.display = "none"; });
     document.getElementById("copyDebugBtn").addEventListener("click", async () => {

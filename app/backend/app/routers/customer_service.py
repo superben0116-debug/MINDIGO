@@ -164,6 +164,27 @@ def _resolve_sid_list(access_token: str, app_id: str, cfg: dict, sid_payload) ->
     return [int(s.get("sid")) for s in (rows or []) if isinstance(s, dict) and str(s.get("sid") or "").isdigit()]
 
 
+def _mail_map(cfg: dict) -> dict:
+    mm = cfg.get("customer_mail_map")
+    return mm if isinstance(mm, dict) else {}
+
+
+def _emails_from_map(cfg: dict, sid_list: list[int] | None = None, shop_names: list[str] | None = None) -> list[str]:
+    mm = _mail_map(cfg)
+    out = []
+    sid_list = sid_list or []
+    shop_names = [str(x or "").strip() for x in (shop_names or []) if str(x or "").strip()]
+    for sid in sid_list:
+        hit = _extract_email_like(mm.get(str(sid)))
+        if hit:
+            out.append(hit)
+    for nm in shop_names:
+        hit = _extract_email_like(mm.get(nm))
+        if hit:
+            out.append(hit)
+    return list(dict.fromkeys(out))
+
+
 def _fetch_mail_items(access_token: str, app_id: str, payload: dict):
     emails = payload.get("emails") or []
     emails = [str(x).strip() for x in emails if str(x).strip()]
@@ -338,6 +359,7 @@ def customer_service_shops(db: Session = Depends(get_db)):
     if token.get("code") not in (200, "200"):
         raise HTTPException(status_code=400, detail=str(token))
     access_token = token.get("data", {}).get("access_token")
+    mm = _mail_map(cfg)
     shops = get_shop_list(access_token, app_id)
     if shops.get("code") != 0:
         raise HTTPException(status_code=400, detail=shops)
@@ -369,6 +391,8 @@ def customer_service_shops(db: Session = Depends(get_db)):
             name = f"SID-{sid}"
         name = _map_shop_name(name)
         email = _extract_shop_email(s)
+        if not email:
+            email = _extract_email_like(mm.get(str(sid))) or _extract_email_like(mm.get(name))
         key = (str(sid), name, email)
         if key in seen:
             continue
@@ -417,8 +441,34 @@ def customer_service_shops(db: Session = Depends(get_db)):
             "sample": raw_data[0] if raw_data else {},
             "shops_without_email": sum(1 for x in rows if not x.get("email")),
             "from_internal_orders": sum(1 for x in rows if x.get("source") == "internal_orders"),
+            "mail_map_count": len(mm.keys()) if isinstance(mm, dict) else 0,
         },
     }
+
+
+@router.get("/mail-map")
+def get_customer_mail_map(db: Session = Depends(get_db)):
+    cfg = get_lingxing_config(db)
+    mm = _mail_map(cfg)
+    return {"items": mm}
+
+
+@router.post("/mail-map")
+def set_customer_mail_map(payload: dict, db: Session = Depends(get_db)):
+    mapping = payload.get("mapping") or {}
+    if not isinstance(mapping, dict):
+        raise HTTPException(status_code=400, detail="mapping must be object")
+    # 保留可识别邮箱的项
+    cleaned = {}
+    for k, v in mapping.items():
+        kk = str(k or "").strip()
+        vv = _extract_email_like(v)
+        if kk and vv:
+            cleaned[kk] = vv
+    cfg = get_lingxing_config(db)
+    cfg["customer_mail_map"] = cleaned
+    crud.set_config(db, "lingxing", cfg)
+    return {"ok": True, "count": len(cleaned)}
 
 
 @router.post("/reply/ai")
@@ -446,7 +496,14 @@ def mail_list(payload: dict, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail=str(token))
     access_token = token.get("data", {}).get("access_token")
 
-    out = _fetch_mail_items(access_token, app_id, payload)
+    sid_list = [int(x) for x in (payload.get("sid") or []) if str(x).strip().isdigit()]
+    map_emails = _emails_from_map(cfg, sid_list=sid_list, shop_names=payload.get("shop_names") or [])
+    merged_payload = dict(payload or {})
+    emails = [str(x).strip() for x in (merged_payload.get("emails") or []) if str(x).strip()]
+    merged_payload["emails"] = list(dict.fromkeys(emails + map_emails))
+    out = _fetch_mail_items(access_token, app_id, merged_payload)
+    if map_emails:
+        out.setdefault("debug", []).append({"stage": "mail_map", "emails": map_emails})
     out["items"].sort(key=lambda x: str(x.get("date") or ""), reverse=True)
     return out
 
@@ -463,9 +520,14 @@ def inbox_list(payload: dict, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail=str(token))
     access_token = token.get("data", {}).get("access_token")
 
-    mail_out = _fetch_mail_items(access_token, app_id, payload)
+    sid_input = [int(x) for x in (payload.get("sid") or []) if str(x).strip().isdigit()]
+    map_emails = _emails_from_map(cfg, sid_list=sid_input, shop_names=payload.get("shop_names") or [])
+    merged_payload = dict(payload or {})
+    emails = [str(x).strip() for x in (merged_payload.get("emails") or []) if str(x).strip()]
+    merged_payload["emails"] = list(dict.fromkeys(emails + map_emails))
+    mail_out = _fetch_mail_items(access_token, app_id, merged_payload)
     items = list(mail_out.get("items") or [])
-    debug = [{"stage": "mail", "summary": {"count": len(items), "total": mail_out.get("total", 0), "debug": mail_out.get("debug", [])}}]
+    debug = [{"stage": "mail", "summary": {"count": len(items), "total": mail_out.get("total", 0), "debug": mail_out.get("debug", []), "map_emails": map_emails}}]
     total = int(mail_out.get("total") or 0)
 
     sid = _resolve_sid_list(access_token, app_id, cfg, payload.get("sid"))
