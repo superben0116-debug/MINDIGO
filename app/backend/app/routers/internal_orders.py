@@ -425,6 +425,8 @@ def _normalize_order_status(v: str | None) -> str:
         return ""
     mapping = {
         "pending": "待审核",
+        "pendingavailability": "未发货",
+        "invoiceunconfirmed": "未发货",
         "unshipped": "未发货",
         "partiallyshipped": "部分发货",
         "shipped": "已发货",
@@ -2086,7 +2088,11 @@ def refresh_pending_status(payload: dict, db: Session = Depends(get_db)):
     if not order_ids:
         base_q = db.query(models.InternalOrder)
         if only_pending:
-            base_q = base_q.filter(models.InternalOrder.order_status.in_(["待审核", "Pending", "pending"]))
+            base_q = base_q.filter(
+                models.InternalOrder.order_status.in_(
+                    ["待审核", "Pending", "pending", "未发货", "待发货", "Unshipped", "unshipped"]
+                )
+            )
         order_ids = [x.id for x in base_q.all()]
     if not order_ids:
         return {"ok": True, "total": 0, "updated": 0}

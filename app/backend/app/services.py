@@ -199,6 +199,7 @@ def run_mws_orders_job(
     sid_list: List[str],
     start_time: datetime | None,
     end_time: datetime | None,
+    date_types: List[int] | None = None,
 ) -> Dict:
     imported = 0
     failed = 0
@@ -210,140 +211,144 @@ def run_mws_orders_job(
         crud.update_import_job(db, job_id, 0, 1, "failed", error_summary="missing start/end date for mws/orders")
         return {"job_id": job_id, "imported": 0, "failed": 1}
 
+    if not date_types:
+        date_types = [2, 1]
+
     for sid in sid_list:
-        crud.add_import_log(db, job_id, "info", f"mws/orders sid={sid}")
-        offset = 0
-        length = 1000
-        while True:
-            res = get_mws_orders(
-                access_token,
-                app_id,
-                int(sid),
-                start_time.strftime("%Y-%m-%d"),
-                end_time.strftime("%Y-%m-%d"),
-                date_type=1,
-                offset=offset,
-                length=length,
-            )
-            if res.get("code") != 0:
-                failed += 1
-                errors.append(res)
-                crud.add_import_log(db, job_id, "error", f"mws/orders error={res}")
-                break
-            data = res.get("data", []) or []
-            crud.add_import_log(db, job_id, "info", f"mws/orders sid={sid} offset={offset} size={len(data)}")
-            total += len(data)
-            asin_map = {}
-            sku_map = {}
-            for row in data:
-                amazon_order_id = row.get("amazon_order_id")
-                if not amazon_order_id:
-                    continue
-                order = crud.get_order_by_platform_no(db, amazon_order_id)
-                if not order:
-                    mapped = {
-                        "internal_order_no": f"IO{datetime.utcnow().strftime('%Y%m%d%H%M%S%f')}",
-                        "platform_order_no": amazon_order_id,
-                        "shop_name": row.get("seller_name"),
-                        "order_status": row.get("order_status"),
-                        "purchase_time": _parse_dt(row.get("purchase_date_local")),
-                        "tracking_no": row.get("tracking_number"),
+        crud.add_import_log(db, job_id, "info", f"mws/orders sid={sid} date_types={date_types}")
+        for dt in date_types:
+            offset = 0
+            length = 1000
+            while True:
+                res = get_mws_orders(
+                    access_token,
+                    app_id,
+                    int(sid),
+                    start_time.strftime("%Y-%m-%d"),
+                    end_time.strftime("%Y-%m-%d"),
+                    date_type=int(dt),
+                    offset=offset,
+                    length=length,
+                )
+                if res.get("code") != 0:
+                    failed += 1
+                    errors.append(res)
+                    crud.add_import_log(db, job_id, "error", f"mws/orders error sid={sid} dt={dt} {res}")
+                    break
+
+                data = res.get("data", []) or []
+                crud.add_import_log(db, job_id, "info", f"mws/orders sid={sid} dt={dt} offset={offset} size={len(data)}")
+                total += len(data)
+                asin_map = {}
+                sku_map = {}
+                for row in data:
+                    amazon_order_id = row.get("amazon_order_id")
+                    if not amazon_order_id:
+                        continue
+                    order = crud.get_order_by_platform_no(db, amazon_order_id)
+                    if not order:
+                        mapped = {
+                            "internal_order_no": f"IO{datetime.utcnow().strftime('%Y%m%d%H%M%S%f')}",
+                            "platform_order_no": amazon_order_id,
+                            "shop_name": row.get("seller_name"),
+                            "order_status": row.get("order_status"),
+                            "purchase_time": _parse_dt(row.get("purchase_date_local")),
+                            "tracking_no": row.get("tracking_number"),
+                        }
+                        order = crud.create_internal_order(db, mapped)
+                    ext = {
+                        "postal_code": row.get("postal_code"),
+                        "sales_channel": row.get("sales_channel"),
+                        "order_total_amount": row.get("order_total_amount"),
+                        "order_total_currency_code": row.get("order_total_currency_code"),
+                        "tracking_number": row.get("tracking_number"),
+                        "purchase_date_local": row.get("purchase_date_local"),
+                        "shipment_date": row.get("shipment_date_local") or row.get("shipment_date"),
+                        "latest_ship_date": row.get("latest_ship_date"),
+                        "earliest_delivery_date": row.get("earliest_delivery_date"),
+                        "latest_delivery_date": row.get("latest_delivery_date"),
+                        "amz_ship": row.get("latest_ship_date"),
+                        "amz_deliver": f"{row.get('earliest_delivery_date','')} - {row.get('latest_delivery_date','')}".strip(" -"),
                     }
-                    order = crud.create_internal_order(db, mapped)
-                ext = {
-                    "postal_code": row.get("postal_code"),
-                    "sales_channel": row.get("sales_channel"),
-                    "order_total_amount": row.get("order_total_amount"),
-                    "order_total_currency_code": row.get("order_total_currency_code"),
-                    "tracking_number": row.get("tracking_number"),
-                    "purchase_date_local": row.get("purchase_date_local"),
-                    "shipment_date": row.get("shipment_date_local") or row.get("shipment_date"),
-                    "latest_ship_date": row.get("latest_ship_date"),
-                    "earliest_delivery_date": row.get("earliest_delivery_date"),
-                    "latest_delivery_date": row.get("latest_delivery_date"),
-                    "amz_ship": row.get("latest_ship_date"),
-                    "amz_deliver": f"{row.get('earliest_delivery_date','')} - {row.get('latest_delivery_date','')}".strip(" -"),
-                }
-                item_list = row.get("item_list") or []
-                if item_list:
-                    item0 = item_list[0]
-                    ext.update({
-                        "sku": item0.get("local_sku") or item0.get("seller_sku"),
-                        "product_name": item0.get("local_name") or item0.get("product_name"),
-                        "purchase_qty": item0.get("quantity_ordered"),
-                        "asin": item0.get("asin"),
-                    })
-                    if item0.get("asin"):
-                        asin_map.setdefault(item0.get("asin"), []).append(order.id)
-                    sku_key = item0.get("seller_sku") or item0.get("local_sku")
-                    if sku_key:
-                        sku_map.setdefault(sku_key, []).append(order.id)
-                crud.upsert_order_ext_bulk(db, order.id, ext)
-                processed += 1
-                crud.upsert_import_progress(db, job_id, total, processed, imported, failed)
+                    item_list = row.get("item_list") or []
+                    if item_list:
+                        item0 = item_list[0]
+                        ext.update({
+                            "sku": item0.get("local_sku") or item0.get("seller_sku"),
+                            "product_name": item0.get("local_name") or item0.get("product_name"),
+                            "purchase_qty": item0.get("quantity_ordered"),
+                            "asin": item0.get("asin"),
+                        })
+                        if item0.get("asin"):
+                            asin_map.setdefault(item0.get("asin"), []).append(order.id)
+                        sku_key = item0.get("seller_sku") or item0.get("local_sku")
+                        if sku_key:
+                            sku_map.setdefault(sku_key, []).append(order.id)
+                    crud.upsert_order_ext_bulk(db, order.id, ext)
+                    processed += 1
+                    crud.upsert_import_progress(db, job_id, total, processed, imported, failed)
 
-            # Enrich with order detail to load product images
-            order_ids = [r.get("amazon_order_id") for r in data if r.get("amazon_order_id")]
-            if order_ids:
+                order_ids = [r.get("amazon_order_id") for r in data if r.get("amazon_order_id")]
+                if order_ids:
+                    try:
+                        detail = get_mws_order_detail(access_token, app_id, order_ids[:200])
+                        if detail.get("code") != 0:
+                            crud.add_import_log(db, job_id, "error", f"mws/orderDetail error={detail}")
+                        else:
+                            for d in detail.get("data", []) or []:
+                                amazon_order_id = d.get("amazon_order_id")
+                                order = crud.get_order_by_platform_no(db, amazon_order_id)
+                                if not order:
+                                    continue
+                                items = crud.get_order_items(db, order.id)
+                                ext_update = {}
+                                for it in d.get("item_list", []) or []:
+                                    if it.get("asin"):
+                                        ext_update["asin"] = it.get("asin")
+                                    sku_val = it.get("sku") or it.get("seller_sku")
+                                    if sku_val:
+                                        ext_update["sku"] = sku_val
+                                    if it.get("product_name") or it.get("title"):
+                                        ext_update["product_name"] = it.get("product_name") or it.get("title")
+                                    if not items:
+                                        crud.create_internal_order_item(db, order.id, {
+                                            "sku": it.get("sku") or it.get("seller_sku"),
+                                            "product_name": it.get("product_name") or it.get("title"),
+                                            "quantity": it.get("quantity_ordered"),
+                                            "unit_price": it.get("unit_price_amount"),
+                                            "currency": it.get("currency"),
+                                            "product_image": it.get("pic_url"),
+                                            "attachments": None,
+                                        })
+                                    else:
+                                        if items[0].sku in (None, "", " "):
+                                            items[0].sku = it.get("sku") or it.get("seller_sku")
+                                        if items[0].product_name in (None, "", " "):
+                                            items[0].product_name = it.get("product_name") or it.get("title")
+                                        if items[0].quantity in (None, 0):
+                                            items[0].quantity = it.get("quantity_ordered")
+                                        if items[0].product_image in (None, "", "/"):
+                                            items[0].product_image = it.get("pic_url")
+                                        db.commit()
+                                first_item = (d.get("item_list") or [])[:1]
+                                if first_item:
+                                    img = first_item[0].get("pic_url")
+                                    if img:
+                                        crud.upsert_order_ext(db, order.id, "product_image", img)
+                                if ext_update:
+                                    crud.upsert_order_ext_bulk(db, order.id, ext_update)
+                    except Exception as exc:
+                        crud.add_import_log(db, job_id, "error", f"mws/orderDetail exception={exc}")
+
                 try:
-                    detail = get_mws_order_detail(access_token, app_id, order_ids[:200])
-                    if detail.get("code") != 0:
-                        crud.add_import_log(db, job_id, "error", f"mws/orderDetail error={detail}")
-                    else:
-                        for d in detail.get("data", []) or []:
-                            amazon_order_id = d.get("amazon_order_id")
-                            order = crud.get_order_by_platform_no(db, amazon_order_id)
-                            if not order:
-                                continue
-                            items = crud.get_order_items(db, order.id)
-                            ext_update = {}
-                            for it in d.get("item_list", []) or []:
-                                if it.get("asin"):
-                                    ext_update["asin"] = it.get("asin")
-                                sku_val = it.get("sku") or it.get("seller_sku")
-                                if sku_val:
-                                    ext_update["sku"] = sku_val
-                                if it.get("product_name") or it.get("title"):
-                                    ext_update["product_name"] = it.get("product_name") or it.get("title")
-                                if not items:
-                                    crud.create_internal_order_item(db, order.id, {
-                                        "sku": it.get("sku") or it.get("seller_sku"),
-                                        "product_name": it.get("product_name") or it.get("title"),
-                                        "quantity": it.get("quantity_ordered"),
-                                        "unit_price": it.get("unit_price_amount"),
-                                        "currency": it.get("currency"),
-                                        "product_image": it.get("pic_url"),
-                                        "attachments": None,
-                                    })
-                                else:
-                                    if items[0].sku in (None, "", " "):
-                                        items[0].sku = it.get("sku") or it.get("seller_sku")
-                                    if items[0].product_name in (None, "", " "):
-                                        items[0].product_name = it.get("product_name") or it.get("title")
-                                    if items[0].quantity in (None, 0):
-                                        items[0].quantity = it.get("quantity_ordered")
-                                    if items[0].product_image in (None, "", "/"):
-                                        items[0].product_image = it.get("pic_url")
-                                    db.commit()
-                            first_item = (d.get("item_list") or [])[:1]
-                            if first_item:
-                                img = first_item[0].get("pic_url")
-                                if img:
-                                    crud.upsert_order_ext(db, order.id, "product_image", img)
-                            if ext_update:
-                                crud.upsert_order_ext_bulk(db, order.id, ext_update)
+                    _apply_listing_images(db, access_token, app_id, sid, "asin", list(asin_map.keys()), asin_map)
+                    _apply_listing_images(db, access_token, app_id, sid, "seller_sku", list(sku_map.keys()), sku_map)
                 except Exception as exc:
-                    crud.add_import_log(db, job_id, "error", f"mws/orderDetail exception={exc}")
-            # Apply listing images by ASIN/SKU
-            try:
-                _apply_listing_images(db, access_token, app_id, sid, "asin", list(asin_map.keys()), asin_map)
-                _apply_listing_images(db, access_token, app_id, sid, "seller_sku", list(sku_map.keys()), sku_map)
-            except Exception as exc:
-                crud.add_import_log(db, job_id, "error", f"listing image exception={exc}")
+                    crud.add_import_log(db, job_id, "error", f"listing image exception={exc}")
 
-            if len(data) < length:
-                break
-            offset += length
+                if len(data) < length:
+                    break
+                offset += length
 
         # Enrich detail in batch for this sid
         try:
@@ -535,8 +540,12 @@ def execute_sync_job(job_id: int) -> Dict:
             end_dt = datetime.strptime(end_str, "%Y-%m-%d") if end_str else None
 
         use_mws_orders = str(cfg.get("use_mws_orders", "1")).lower() not in ("0", "false", "no")
+        mws_date_types_cfg = str(cfg.get("mws_date_types") or "2,1")
+        mws_date_types = [int(x.strip()) for x in mws_date_types_cfg.split(",") if x.strip().isdigit()]
+        if not mws_date_types:
+            mws_date_types = [2, 1]
         if use_mws_orders:
-            result = run_mws_orders_job(db, job_id, app_id, access_token, sid_list, start_dt, end_dt)
+            result = run_mws_orders_job(db, job_id, app_id, access_token, sid_list, start_dt, end_dt, date_types=mws_date_types)
         else:
             result = run_sync_job(db, job_id, app_id, access_token, sid_list, start_dt, end_dt, chunk_days)
 
