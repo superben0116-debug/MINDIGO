@@ -105,6 +105,9 @@
             <button class="chip" id="statusShippedBtn">已发货</button>
             <button class="chip" id="statusCanceledBtn">已取消</button>
             <button class="chip" id="statusClearBtn">清除状态</button>
+            <span class="helper" style="margin-left:8px;">汇率</span>
+            <input id="exchangeRateInput" placeholder="例如 7 / 6.7" style="width:96px;" />
+            <button class="btn" id="saveExchangeRateBtn" style="background:#0f766e;">保存汇率</button>
             <button class="btn" id="refreshAllBtn" style="background:#2563eb;">一键更新订单和状态</button>
             <button class="btn" id="refreshPendingBtn">刷新待审核</button>
             <button class="btn" id="dedupeBtn" style="background:#0f766e;">清理重复订单</button>
@@ -211,6 +214,8 @@
     const filterBody = document.getElementById("filterBody");
     const filterTitle = document.getElementById("filterTitle");
     const viewSelect = document.getElementById("viewSelect");
+    const exchangeRateInput = document.getElementById("exchangeRateInput");
+    const saveExchangeRateBtn = document.getElementById("saveExchangeRateBtn");
     let quickStatus = "";
     let autoEnrichRunning = false;
     let lastAutoEnrichAt = 0;
@@ -1716,6 +1721,37 @@
       localStorage.setItem("savedViews", JSON.stringify(savedViews));
       loadViews();
     });
+    async function loadInternalOrderSettings() {
+      try {
+        const res = await fetch("/internal-orders/settings");
+        const out = await res.json();
+        if (res.ok && !out.detail && out.exchange_rate) {
+          exchangeRateInput.value = String(out.exchange_rate);
+        } else if (!exchangeRateInput.value) {
+          exchangeRateInput.value = "7";
+        }
+      } catch (_) {
+        if (!exchangeRateInput.value) exchangeRateInput.value = "7";
+      }
+    }
+    saveExchangeRateBtn.addEventListener("click", async () => {
+      const v = Number(exchangeRateInput.value);
+      if (!Number.isFinite(v) || v <= 0 || v > 100) {
+        alert("汇率格式错误，请输入数字（0~100）");
+        return;
+      }
+      const res = await fetch("/internal-orders/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ exchange_rate: v }),
+      });
+      const out = await res.json().catch(() => ({}));
+      if (!res.ok || out.detail) {
+        alert(`保存汇率失败: ${JSON.stringify(out.detail || out)}`);
+        return;
+      }
+      alert(`汇率已保存: ${out.exchange_rate}`);
+    });
     document.getElementById("statusUnshippedBtn").addEventListener("click", () => applyQuickStatus("unshipped"));
     document.getElementById("statusPendingBtn").addEventListener("click", () => applyQuickStatus("pending"));
     document.getElementById("statusShippedBtn").addEventListener("click", () => applyQuickStatus("shipped"));
@@ -1800,6 +1836,7 @@
     buildHeader();
     buildGroupBar();
     loadViews();
+    loadInternalOrderSettings();
     loadOrders();
 
     // Auto sync Lingxing once per day to keep newest orders loaded.

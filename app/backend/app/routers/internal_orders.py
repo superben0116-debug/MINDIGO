@@ -40,6 +40,7 @@ SHOP_NAME_MAP = {
     "聚乐-US": "聚乐",
     "译文-US": "译文",
 }
+DEFAULT_EXCHANGE_RATE = 7.0
 
 
 def _map_shop_name(v: str | None) -> str:
@@ -47,6 +48,18 @@ def _map_shop_name(v: str | None) -> str:
     if not raw:
         return ""
     return SHOP_NAME_MAP.get(raw, raw)
+
+
+def _get_exchange_rate(db: Session) -> float:
+    cfg = crud.get_config(db, "internal_orders_settings")
+    if cfg and isinstance(cfg.config_value, dict):
+        try:
+            rate = float(cfg.config_value.get("exchange_rate"))
+            if rate > 0:
+                return rate
+        except Exception:
+            pass
+    return DEFAULT_EXCHANGE_RATE
 
 
 def _to_ymd(v):
@@ -851,6 +864,23 @@ def list_internal_orders(limit: int = 50, offset: int = 0, db: Session = Depends
     return {"items": items, "total": len(orders)}
 
 
+@router.get("/settings")
+def get_internal_order_settings(db: Session = Depends(get_db)):
+    return {"exchange_rate": _get_exchange_rate(db)}
+
+
+@router.post("/settings")
+def set_internal_order_settings(payload: dict, db: Session = Depends(get_db)):
+    try:
+        rate = float(payload.get("exchange_rate"))
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid exchange_rate")
+    if rate <= 0 or rate > 100:
+        raise HTTPException(status_code=400, detail="exchange_rate out of range")
+    crud.set_config(db, "internal_orders_settings", {"exchange_rate": rate})
+    return {"ok": True, "exchange_rate": rate}
+
+
 @router.post("/export-selected")
 def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
     ids = payload.get("order_ids") if isinstance(payload, dict) else None
@@ -869,6 +899,7 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
     app_id = str(cfg.get("app_id") or cfg.get("APP_ID") or "").strip()
     app_secret = str(cfg.get("app_secret") or cfg.get("APP_SECRET") or "").strip()
     _mws_token = None
+    exchange_rate = _get_exchange_rate(db)
     for oid in ids:
         try:
             order_id = int(oid)
@@ -1273,6 +1304,17 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
                 r = start_row
                 tail = start_row + block_size - 1
                 ws.cell(r, c_bd).value = f"=Q{r}+AL{r}+BC{r}+AL{tail}"
+            # 利润(BF)=回款(BE)*汇率-总成本(BD)，汇率支持配置
+            c_bf = column_index_from_string("BF")
+            c_be = column_index_from_string("BE")
+            if c_bf and c_be and c_bd:
+                rate_text = f"{exchange_rate:.4f}".rstrip("0").rstrip(".")
+                if int(col_spans.get(c_bf, 1) or 1) == 1:
+                    for rr in range(start_row, start_row + block_size):
+                        ws.cell(rr, c_bf).value = f"={get_column_letter(c_be)}{rr}*{rate_text}-{get_column_letter(c_bd)}{rr}"
+                else:
+                    rr = start_row
+                    ws.cell(rr, c_bf).value = f"={get_column_letter(c_be)}{rr}*{rate_text}-{get_column_letter(c_bd)}{rr}"
             # 4行补公式：模板部分共享公式在xml中会丢失，按列规则强制补齐R1-R4
             if use_4:
                 c_ag = header_map.get("头程运费总价")
