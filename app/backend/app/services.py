@@ -221,16 +221,31 @@ def run_mws_orders_job(
             offset = 0
             length = 1000
             while True:
-                res = get_mws_orders(
-                    access_token,
-                    app_id,
-                    int(sid),
-                    start_time.strftime("%Y-%m-%d"),
-                    end_time.strftime("%Y-%m-%d"),
-                    date_type=int(dt),
-                    offset=offset,
-                    length=length,
-                )
+                retry = 0
+                while True:
+                    res = get_mws_orders(
+                        access_token,
+                        app_id,
+                        int(sid),
+                        start_time.strftime("%Y-%m-%d"),
+                        end_time.strftime("%Y-%m-%d"),
+                        date_type=int(dt),
+                        offset=offset,
+                        length=length,
+                    )
+                    if res.get("code") != 3001008:
+                        break
+                    retry += 1
+                    if retry >= 5:
+                        break
+                    wait_s = min(8, 2 ** retry)
+                    crud.add_import_log(
+                        db,
+                        job_id,
+                        "warn",
+                        f"mws/orders rate limited sid={sid} dt={dt} offset={offset} retry={retry} wait={wait_s}s",
+                    )
+                    time.sleep(wait_s)
                 if res.get("code") != 0:
                     failed += 1
                     errors.append(res)
@@ -508,6 +523,7 @@ def execute_sync_job(job_id: int) -> Dict:
         crud.add_import_log(db, job_id, "info", "token ok")
 
         sid_cfg = str(cfg.get("sid_list", "")).strip()
+        shops_data = []
         crud.add_import_log(db, job_id, "info", f"sid_list_cfg={sid_cfg or 'EMPTY'}")
         sid_list = [s for s in sid_cfg.split(",") if s]
         if not sid_list or sid_cfg.upper() == "ALL":
@@ -522,7 +538,20 @@ def execute_sync_job(job_id: int) -> Dict:
                 crud.update_import_job(db, job_id, 0, 1, "failed", error_summary=str(shops))
                 crud.add_import_log(db, job_id, "error", f"shop list error={shops}")
                 return {"job_id": job_id, "imported": 0, "failed": 1}
-            sid_list = [str(s.get("sid")) for s in shops.get("data", []) if s.get("sid") is not None]
+            shops_data = shops.get("data", []) or []
+            sid_list = [str(s.get("sid")) for s in shops_data if s.get("sid") is not None]
+        else:
+            try:
+                shops = get_shop_list(access_token, app_id)
+                if shops.get("code") == 0:
+                    shops_data = shops.get("data", []) or []
+            except Exception:
+                shops_data = []
+        sid_name_map = {
+            str(s.get("sid")): (s.get("name") or s.get("shop_name") or s.get("account_name") or "")
+            for s in shops_data
+            if s.get("sid") is not None
+        }
         crud.add_import_log(db, job_id, "info", f"sid_list={sid_list}")
 
         start_str = cfg.get("start_time")
@@ -555,49 +584,96 @@ def execute_sync_job(job_id: int) -> Dict:
         # Enrich via All Orders Report (optional)
         use_report = str(cfg.get("use_all_orders_report", "1")).lower() not in ("0", "false", "no")
         if use_report and start_dt and end_dt:
+            all_orders_date_types_cfg = str(cfg.get("all_orders_date_types") or "1,2")
+            all_orders_date_types = [int(x.strip()) for x in all_orders_date_types_cfg.split(",") if x.strip().isdigit()]
+            if not all_orders_date_types:
+                all_orders_date_types = [1, 2]
             for sid in sid_list:
-                crud.add_import_log(db, job_id, "info", f"allOrders sid={sid} range {start_dt.date()} -> {end_dt.date()}")
-                offset = 0
-                length = 1000
-                while True:
-                    report = get_all_orders_report(
-                        access_token,
-                        app_id,
-                        sid,
-                        start_dt.strftime("%Y-%m-%d"),
-                        end_dt.strftime("%Y-%m-%d"),
-                        date_type=1,
-                        offset=offset,
-                        length=length,
+                for report_dt in all_orders_date_types:
+                    crud.add_import_log(
+                        db,
+                        job_id,
+                        "info",
+                        f"allOrders sid={sid} dt={report_dt} range {start_dt.date()} -> {end_dt.date()}",
                     )
-                    if report.get("code") != 0:
-                        crud.add_import_log(db, job_id, "error", f"allOrders error={report}")
-                        break
-                    data = report.get("data", []) or []
-                    crud.add_import_log(db, job_id, "info", f"allOrders sid={sid} offset={offset} size={len(data)}")
-                    for row in data:
-                        amazon_order_id = row.get("amazon_order_id") or row.get("merchant_order_id")
-                        if not amazon_order_id:
-                            continue
-                        order = crud.get_order_by_platform_no(db, amazon_order_id)
-                        if not order:
-                            continue
-                        ext = {
-                            "sales_channel": row.get("sales_channel"),
-                            "order_status": row.get("order_status"),
-                            "ship_service_level": row.get("ship_service_level"),
-                            "sku": row.get("sku"),
-                            "product_name": row.get("product_name"),
-                            "purchase_qty": row.get("quantity"),
-                            "unit_price": row.get("item_price"),
-                            "currency": row.get("currency"),
-                            "amz_ship": row.get("shipment_date"),
-                            "purchase_date_local": row.get("purchase_date_local"),
-                        }
-                        crud.upsert_order_ext_bulk(db, order.id, ext)
-                    if len(data) < length:
-                        break
-                    offset += length
+                    offset = 0
+                    length = 1000
+                    while True:
+                        retry = 0
+                        while True:
+                            report = get_all_orders_report(
+                                access_token,
+                                app_id,
+                                sid,
+                                start_dt.strftime("%Y-%m-%d"),
+                                end_dt.strftime("%Y-%m-%d"),
+                                date_type=report_dt,
+                                offset=offset,
+                                length=length,
+                            )
+                            if report.get("code") != 3001008:
+                                break
+                            retry += 1
+                            if retry >= 5:
+                                break
+                            wait_s = min(8, 2 ** retry)
+                            crud.add_import_log(
+                                db,
+                                job_id,
+                                "warn",
+                                f"allOrders rate limited sid={sid} dt={report_dt} offset={offset} retry={retry} wait={wait_s}s",
+                            )
+                            time.sleep(wait_s)
+                        if report.get("code") != 0:
+                            crud.add_import_log(db, job_id, "error", f"allOrders sid={sid} dt={report_dt} error={report}")
+                            break
+                        data = report.get("data", []) or []
+                        crud.add_import_log(db, job_id, "info", f"allOrders sid={sid} dt={report_dt} offset={offset} size={len(data)}")
+                        for row in data:
+                            amazon_order_id = row.get("amazon_order_id") or row.get("merchant_order_id")
+                            if not amazon_order_id:
+                                continue
+                            order = crud.get_order_by_platform_no(db, amazon_order_id)
+                            if not order:
+                                mapped = {
+                                    "internal_order_no": f"IO{datetime.utcnow().strftime('%Y%m%d%H%M%S%f')}",
+                                    "platform_order_no": amazon_order_id,
+                                    "shop_name": sid_name_map.get(str(sid)) or row.get("seller_name"),
+                                    "order_status": row.get("order_status"),
+                                    "purchase_time": _parse_dt(row.get("purchase_date_local")),
+                                }
+                                order = crud.create_internal_order(db, mapped)
+                                first_sku = row.get("sku")
+                                if first_sku or row.get("product_name"):
+                                    crud.create_internal_order_item(
+                                        db,
+                                        order.id,
+                                        {
+                                            "sku": first_sku or "",
+                                            "product_name": row.get("product_name") or "",
+                                            "quantity": int(row.get("quantity") or 1),
+                                            "unit_price": float(row.get("item_price") or 0),
+                                            "currency": row.get("currency") or "USD",
+                                            "product_image": "",
+                                            "attachments": None,
+                                        },
+                                    )
+                            ext = {
+                                "sales_channel": row.get("sales_channel"),
+                                "order_status": row.get("order_status"),
+                                "ship_service_level": row.get("ship_service_level"),
+                                "sku": row.get("sku"),
+                                "product_name": row.get("product_name"),
+                                "purchase_qty": row.get("quantity"),
+                                "unit_price": row.get("item_price"),
+                                "currency": row.get("currency"),
+                                "amz_ship": row.get("shipment_date"),
+                                "purchase_date_local": row.get("purchase_date_local"),
+                            }
+                            crud.upsert_order_ext_bulk(db, order.id, ext)
+                        if len(data) < length:
+                            break
+                        offset += length
         # Auto backfill missing asin/sku/images after sync
         try:
             sid_list_value = ",".join(sid_list) if sid_list else cfg.get("sid_list")
