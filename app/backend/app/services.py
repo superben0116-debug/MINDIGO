@@ -10,6 +10,7 @@ from app.integrations.lingxing_client import (
     get_mws_orders,
     get_mws_order_detail,
     get_listing_search,
+    get_mp_order_list,
     get_shop_list,
 )
 from app.transform import map_order_detail, map_order_items, map_order_packages, map_order_ext
@@ -21,6 +22,152 @@ from app.db import SessionLocal
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 import time
+
+
+def _clean(v):
+    if v is None:
+        return None
+    s = str(v).strip()
+    if not s or s.lower() in ("none", "null", "nan"):
+        return None
+    return s
+
+
+def _to_ymd(v):
+    if v in (None, "", 0, "0"):
+        return None
+    try:
+        # 秒级时间戳
+        if isinstance(v, (int, float)) or str(v).isdigit():
+            ts = int(v)
+            if ts > 10_000_000_000:  # 毫秒级
+                ts = ts // 1000
+            return datetime.fromtimestamp(ts).strftime("%Y-%m-%d")
+        s = str(v).strip()
+        if "T" in s:
+            s = s.replace("Z", "")
+            return datetime.fromisoformat(s[:19]).strftime("%Y-%m-%d")
+        return datetime.strptime(s[:19], "%Y-%m-%d %H:%M:%S").strftime("%Y-%m-%d")
+    except Exception:
+        return None
+
+
+def _country_name(code: str | None) -> str:
+    c = (code or "").strip().upper()
+    return {"US": "美国", "CA": "加拿大", "CN": "中国"}.get(c, c or "")
+
+
+def _enrich_orders_from_mp_list(
+    db: Session,
+    access_token: str,
+    app_id: str,
+    sid: str,
+    platform_order_nos: list[str],
+    job_id: int | None = None,
+):
+    order_nos = [str(x).strip() for x in (platform_order_nos or []) if str(x).strip()]
+    if not order_nos:
+        return 0
+    payload = {
+        "offset": 0,
+        "length": min(200, len(order_nos)),
+        "platform_code": [10001],
+        "store_id": [str(sid)],
+        "platform_order_nos": order_nos[:200],
+    }
+    res = get_mp_order_list(access_token, app_id, payload)
+    if res.get("code") != 0:
+        if job_id is not None:
+            crud.add_import_log(db, job_id, "warn", f"mp/list enrich sid={sid} error={res}")
+        return 0
+    rows = ((res.get("data") or {}).get("list") or [])
+    updated = 0
+    for row in rows:
+        candidates = set()
+        for p in (row.get("platform_info") or []):
+            for k in ("platform_order_no", "platform_order_name"):
+                v = _clean(p.get(k))
+                if v:
+                    candidates.add(v)
+        for it in (row.get("item_info") or []):
+            v = _clean(it.get("platform_order_no"))
+            if v:
+                candidates.add(v)
+        if not candidates:
+            continue
+        target = None
+        for no in candidates:
+            if no in order_nos:
+                target = no
+                break
+        if not target:
+            continue
+        order = crud.get_order_by_platform_no(db, target)
+        if not order:
+            continue
+
+        raw_addr = row.get("address_info")
+        addr = {}
+        if isinstance(raw_addr, list):
+            addr = raw_addr[0] if raw_addr else {}
+        elif isinstance(raw_addr, dict):
+            addr = raw_addr
+
+        name = _clean(addr.get("receiver_name"))
+        line1 = _clean(addr.get("address_line1"))
+        line2 = _clean(addr.get("address_line2"))
+        line3 = _clean(addr.get("address_line3"))
+        city = _clean(addr.get("city"))
+        state = _clean(addr.get("state_or_region"))
+        zip5 = _clean(addr.get("postal_code"))
+        country_code = _clean(addr.get("receiver_country_code"))
+        phone = _clean(addr.get("receiver_mobile") or addr.get("receiver_tel"))
+        buyer_name = _clean(row.get("buyer_name")) or name
+        address_type = "住宅" if str(row.get("address_type") or "1") == "1" else "商业地址"
+
+        city_line = ", ".join([x for x in [city, state] if x])
+        if zip5:
+            city_line = f"{city_line} {zip5}".strip()
+        customer_lines = [x for x in [name, line1, " ".join([x for x in [line2, line3] if x]).strip(), city_line] if x]
+        if country_code:
+            customer_lines.append(_country_name(country_code))
+        customer_lines.append(f"地址类型:  {address_type}")
+        if buyer_name:
+            customer_lines.append(f"联系买家:\t{buyer_name}")
+        if phone:
+            customer_lines.append(f"电话:\t{phone}")
+
+        ext = {
+            "receiver_name": name,
+            "address_line1": line1,
+            "address_line2": line2,
+            "address_line3": line3,
+            "city": city,
+            "state_or_region": state,
+            "postal_code": zip5,
+            "receiver_country_code": country_code,
+            "receiver_mobile": phone,
+            "电话": phone,
+            "buyer_name": buyer_name,
+            "客户地址": "\n".join([x for x in customer_lines if x]),
+            "出单日期": _to_ymd(row.get("global_purchase_time")),
+            "发货日": _to_ymd(row.get("global_delivery_time") or row.get("global_latest_ship_time")),
+        }
+
+        # 补物流方式/单号（若有）
+        logistics = row.get("logistics_info") or {}
+        tracking_no = _clean(logistics.get("tracking_no") or logistics.get("waybill_no"))
+        carrier = _clean(logistics.get("actual_carrier") or logistics.get("logistics_provider_name") or logistics.get("logistics_type_name"))
+        if tracking_no:
+            ext["联邦单号"] = tracking_no
+        if carrier:
+            ext["联邦方式"] = carrier
+        # 仅保留有值字段，避免覆盖已有正确值
+        ext = {k: v for k, v in ext.items() if v not in (None, "", "None", "null")}
+        if ext:
+            crud.upsert_order_ext_bulk(db, order.id, ext)
+            updated += 1
+    return updated
 
 
 def _iter_time_windows(start: datetime, end: datetime, days: int):
@@ -362,6 +509,16 @@ def run_mws_orders_job(
                 except Exception as exc:
                     crud.add_import_log(db, job_id, "error", f"listing image exception={exc}")
 
+                # 自动补全买家信息（地址/电话/联系人），确保新增订单立刻可见
+                try:
+                    page_order_nos = [str(r.get("amazon_order_id")).strip() for r in data if r.get("amazon_order_id")]
+                    if page_order_nos:
+                        enriched = _enrich_orders_from_mp_list(db, access_token, app_id, str(sid), page_order_nos, job_id=job_id)
+                        if enriched:
+                            crud.add_import_log(db, job_id, "info", f"mp/list enriched sid={sid} count={enriched}")
+                except Exception as exc:
+                    crud.add_import_log(db, job_id, "error", f"mp/list enrich exception sid={sid} {exc}")
+
                 if len(data) < length:
                     break
                 offset += length
@@ -671,6 +828,23 @@ def execute_sync_job(job_id: int) -> Dict:
                                 "purchase_date_local": row.get("purchase_date_local"),
                             }
                             crud.upsert_order_ext_bulk(db, order.id, ext)
+                        # 对 allOrders 新增/更新订单，再补一次买家地址信息
+                        try:
+                            report_order_nos = [
+                                str((r.get("amazon_order_id") or r.get("merchant_order_id"))).strip()
+                                for r in data
+                                if (r.get("amazon_order_id") or r.get("merchant_order_id"))
+                            ]
+                            if report_order_nos:
+                                enriched = _enrich_orders_from_mp_list(
+                                    db, access_token, app_id, str(sid), report_order_nos, job_id=job_id
+                                )
+                                if enriched:
+                                    crud.add_import_log(
+                                        db, job_id, "info", f"mp/list enriched(allOrders) sid={sid} count={enriched}"
+                                    )
+                        except Exception as exc:
+                            crud.add_import_log(db, job_id, "error", f"mp/list enrich(allOrders) sid={sid} {exc}")
                         if len(data) < length:
                             break
                         offset += length
