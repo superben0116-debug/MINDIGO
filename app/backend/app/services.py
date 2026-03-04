@@ -19,6 +19,7 @@ from app.address_mapping import default_address_mapping
 from app.config_store import get_lingxing_config
 from app.db import SessionLocal
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 import time
 
 
@@ -532,7 +533,9 @@ def execute_sync_job(job_id: int) -> Dict:
         auto_rolling = str(cfg.get("auto_rolling_window", "1")).lower() not in ("0", "false", "no")
         rolling_days = int(cfg.get("rolling_days") or 30)
         if auto_rolling:
-            end_dt = datetime.utcnow()
+            # 用北京时间做滚动窗口，并把结束日期扩到明天，避免时区边界导致“今天订单”漏抓
+            now_cn = datetime.now(ZoneInfo("Asia/Shanghai"))
+            end_dt = now_cn + timedelta(days=1)
             start_dt = end_dt - timedelta(days=max(1, rolling_days))
             crud.add_import_log(db, job_id, "info", f"auto rolling window {start_dt.strftime('%Y-%m-%d')} -> {end_dt.strftime('%Y-%m-%d')}")
         else:
