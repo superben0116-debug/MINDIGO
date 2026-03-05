@@ -463,9 +463,55 @@ def run_mws_orders_job(
                                 order = crud.get_order_by_platform_no(db, amazon_order_id)
                                 if not order:
                                     continue
-                                items = crud.get_order_items(db, order.id)
                                 ext_update = {}
-                                for it in d.get("item_list", []) or []:
+                                detail_items = d.get("item_list", []) or []
+                                # 每次按详情重建商品行：
+                                # - 同一订单同 SKU 合并数量
+                                # - 同一订单不同 SKU 保留多行
+                                if detail_items:
+                                    try:
+                                        db.query(models.InternalOrderItem).filter(
+                                            models.InternalOrderItem.internal_order_id == order.id
+                                        ).delete(synchronize_session=False)
+                                        grouped = {}
+                                        for it in detail_items:
+                                            sku_val = (it.get("sku") or it.get("seller_sku") or "").strip()
+                                            key = sku_val or f"__NO_SKU__{it.get('order_item_id') or id(it)}"
+                                            g = grouped.get(key)
+                                            qty = int(it.get("quantity_ordered") or 0)
+                                            if g is None:
+                                                grouped[key] = {
+                                                    "sku": sku_val,
+                                                    "product_name": it.get("product_name") or it.get("title") or "",
+                                                    "quantity": qty,
+                                                    "unit_price": float(it.get("unit_price_amount") or it.get("item_price_amount") or 0),
+                                                    "currency": it.get("currency") or d.get("currency") or "USD",
+                                                    "product_image": it.get("pic_url") or "",
+                                                }
+                                            else:
+                                                g["quantity"] = int(g.get("quantity") or 0) + qty
+                                                if not g.get("product_name"):
+                                                    g["product_name"] = it.get("product_name") or it.get("title") or ""
+                                                if not g.get("product_image"):
+                                                    g["product_image"] = it.get("pic_url") or ""
+                                        for g in grouped.values():
+                                            crud.create_internal_order_item(
+                                                db,
+                                                order.id,
+                                                {
+                                                    "sku": g.get("sku"),
+                                                    "product_name": g.get("product_name"),
+                                                    "quantity": g.get("quantity"),
+                                                    "unit_price": g.get("unit_price"),
+                                                    "currency": g.get("currency"),
+                                                    "product_image": g.get("product_image"),
+                                                    "attachments": None,
+                                                },
+                                            )
+                                    except Exception as exc:
+                                        crud.add_import_log(db, job_id, "error", f"rebuild order_items exception={exc}")
+
+                                for it in detail_items:
                                     if it.get("asin"):
                                         ext_update["asin"] = it.get("asin")
                                     sku_val = it.get("sku") or it.get("seller_sku")
@@ -473,26 +519,6 @@ def run_mws_orders_job(
                                         ext_update["sku"] = sku_val
                                     if it.get("product_name") or it.get("title"):
                                         ext_update["product_name"] = it.get("product_name") or it.get("title")
-                                    if not items:
-                                        crud.create_internal_order_item(db, order.id, {
-                                            "sku": it.get("sku") or it.get("seller_sku"),
-                                            "product_name": it.get("product_name") or it.get("title"),
-                                            "quantity": it.get("quantity_ordered"),
-                                            "unit_price": it.get("unit_price_amount"),
-                                            "currency": it.get("currency"),
-                                            "product_image": it.get("pic_url"),
-                                            "attachments": None,
-                                        })
-                                    else:
-                                        if items[0].sku in (None, "", " "):
-                                            items[0].sku = it.get("sku") or it.get("seller_sku")
-                                        if items[0].product_name in (None, "", " "):
-                                            items[0].product_name = it.get("product_name") or it.get("title")
-                                        if items[0].quantity in (None, 0):
-                                            items[0].quantity = it.get("quantity_ordered")
-                                        if items[0].product_image in (None, "", "/"):
-                                            items[0].product_image = it.get("pic_url")
-                                        db.commit()
                                 first_item = (d.get("item_list") or [])[:1]
                                 if first_item:
                                     img = first_item[0].get("pic_url")
