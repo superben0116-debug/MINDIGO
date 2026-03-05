@@ -354,6 +354,8 @@ def run_mws_orders_job(
     errors = []
     total = 0
     processed = 0
+    cleared_item_orders: set[str] = set()
+    seen_item_keys: set[str] = set()
 
     if not start_time or not end_time:
         crud.update_import_job(db, job_id, 0, 1, "failed", error_summary="missing start/end date for mws/orders")
@@ -419,6 +421,13 @@ def run_mws_orders_job(
                             "tracking_no": row.get("tracking_number"),
                         }
                         order = crud.create_internal_order(db, mapped)
+                    # 每次任务内，按订单先清空一次商品行再重建，避免历史脏数据/重复累加
+                    if amazon_order_id not in cleared_item_orders:
+                        db.query(models.InternalOrderItem).filter(
+                            models.InternalOrderItem.internal_order_id == order.id
+                        ).delete(synchronize_session=False)
+                        db.commit()
+                        cleared_item_orders.add(amazon_order_id)
                     ext = {
                         "postal_code": row.get("postal_code"),
                         "sales_channel": row.get("sales_channel"),
@@ -447,6 +456,49 @@ def run_mws_orders_job(
                         sku_key = item0.get("seller_sku") or item0.get("local_sku")
                         if sku_key:
                             sku_map.setdefault(sku_key, []).append(order.id)
+                        # 重建多SKU行：同SKU合并数量，不同SKU拆行
+                        for it in item_list:
+                            sku_val = (it.get("sku") or it.get("seller_sku") or "").strip()
+                            order_item_id = str(it.get("order_item_id") or "").strip()
+                            sig = f"{amazon_order_id}|{order_item_id}|{sku_val}|{it.get('quantity_ordered')}|{it.get('unit_price_amount') or it.get('item_price_amount')}"
+                            if sig in seen_item_keys:
+                                continue
+                            seen_item_keys.add(sig)
+                            qty = int(it.get("quantity_ordered") or it.get("quantity") or 0)
+                            pname = it.get("product_name") or it.get("title") or ""
+                            uprice = float(it.get("unit_price_amount") or it.get("item_price_amount") or 0)
+                            curr = it.get("currency") or row.get("currency") or "USD"
+                            pimg = it.get("pic_url") or ""
+                            # 合并同SKU
+                            target_item = None
+                            if sku_val:
+                                for ex in crud.get_order_items(db, order.id):
+                                    if (ex.sku or "").strip() == sku_val:
+                                        target_item = ex
+                                        break
+                            if target_item:
+                                target_item.quantity = int(target_item.quantity or 0) + qty
+                                if not (target_item.product_name or "").strip():
+                                    target_item.product_name = pname
+                                if not (target_item.product_image or "").strip():
+                                    target_item.product_image = pimg
+                                if (target_item.unit_price in (None, 0, 0.0, "0", "0.0", "0.00")) and uprice:
+                                    target_item.unit_price = uprice
+                                db.commit()
+                            else:
+                                crud.create_internal_order_item(
+                                    db,
+                                    order.id,
+                                    {
+                                        "sku": sku_val,
+                                        "product_name": pname,
+                                        "quantity": qty,
+                                        "unit_price": uprice,
+                                        "currency": curr,
+                                        "product_image": pimg,
+                                        "attachments": None,
+                                    },
+                                )
                     crud.upsert_order_ext_bulk(db, order.id, ext)
                     processed += 1
                     crud.upsert_import_progress(db, job_id, total, processed, imported, failed)
