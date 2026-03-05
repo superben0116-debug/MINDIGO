@@ -116,12 +116,30 @@
         body: JSON.stringify({ username, password, role: "supplier" }),
       }).then(async (r) => {
         const j = await r.json().catch(() => ({}));
-        if (!r.ok || !j.ok) {
-          msg.textContent = `登录失败：${j.detail || r.status}`;
+        if (r.ok && j.ok) {
+          localStorage.setItem("supplier_name", j?.user?.supplier_name || j?.user?.username || "");
+          location.href = "/ui/supplier_quote.html";
           return;
         }
-        localStorage.setItem("supplier_name", j?.user?.supplier_name || j?.user?.username || "");
-        location.href = "/ui/supplier_quote.html";
+        if (j.detail === "role_mismatch") {
+          const r2 = await fetch("/auth/login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify({ username, password }),
+          });
+          const j2 = await r2.json().catch(() => ({}));
+          if (r2.ok && j2.ok) {
+            if (j2?.user?.role === "admin") {
+              location.href = "/ui/internal_orders.html";
+              return;
+            }
+            localStorage.setItem("supplier_name", j2?.user?.supplier_name || j2?.user?.username || "");
+            location.href = "/ui/supplier_quote.html";
+            return;
+          }
+        }
+        msg.textContent = `登录失败：${j.detail || r.status}`;
       }).catch((e) => {
         msg.textContent = `登录失败：${e?.message || e}`;
       });
