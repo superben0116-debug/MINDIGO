@@ -3,6 +3,8 @@ from fastapi.staticfiles import StaticFiles
 import os
 import threading
 import time
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from app.db import Base, engine
 from app.db import SessionLocal
 from app import models, crud
@@ -26,6 +28,7 @@ from app.routers.customer_service import router as customer_service_router
 
 app = FastAPI(title="Ultimate ERP")
 _auto_sync_started = False
+_last_full_sync_date_cn = None
 
 
 def _is_truthy(v: str | None) -> bool:
@@ -50,28 +53,63 @@ def _auto_sync_loop():
     interval_min = int(os.getenv("ERP_AUTO_SYNC_INTERVAL_MINUTES", "30") or "30")
     if interval_min < 5:
         interval_min = 5
+    full_sync_hour_cn = int(os.getenv("ERP_DAILY_FULL_SYNC_HOUR_CN", "9") or "9")
+    full_sync_window_min = int(os.getenv("ERP_DAILY_FULL_SYNC_WINDOW_MIN", "10") or "10")
+    full_sync_rolling_days = int(os.getenv("ERP_DAILY_FULL_SYNC_ROLLING_DAYS", "120") or "120")
+    last_regular_run_at = 0.0
+
+    def _run_sync(db, cfg: dict, full: bool = False):
+        running = (
+            db.query(models.ImportJob.id)
+            .filter(
+                models.ImportJob.job_type == "lingxing_fbm",
+                models.ImportJob.status.in_(["queued", "running"]),
+            )
+            .first()
+        )
+        if running:
+            return False
+        backup_cfg = None
+        try:
+            if full:
+                backup_cfg = dict(cfg)
+                cfg["auto_rolling_window"] = 1
+                cfg["rolling_days"] = max(30, full_sync_rolling_days)
+                crud.set_config(db, "lingxing", cfg)
+            job = crud.create_import_job(db, "lingxing_fbm")
+            execute_sync_job(job.id)
+            return True
+        finally:
+            if backup_cfg is not None:
+                crud.set_config(db, "lingxing", backup_cfg)
+
     while True:
         db = SessionLocal()
         try:
             cfg = crud.get_config(db, "lingxing")
             lxcfg = cfg.config_value if cfg and isinstance(cfg.config_value, dict) else {}
             if _config_ready_for_sync(lxcfg):
-                running = (
-                    db.query(models.ImportJob.id)
-                    .filter(
-                        models.ImportJob.job_type == "lingxing_fbm",
-                        models.ImportJob.status.in_(["queued", "running"]),
-                    )
-                    .first()
+                now_ts = time.time()
+                now_cn = datetime.now(ZoneInfo("Asia/Shanghai"))
+                # 30分钟增量更新
+                if now_ts - last_regular_run_at >= interval_min * 60:
+                    if _run_sync(db, dict(lxcfg), full=False):
+                        last_regular_run_at = now_ts
+                # 每日北京时间9点全量更新（窗口内仅触发1次）
+                global _last_full_sync_date_cn
+                in_full_window = (
+                    now_cn.hour == full_sync_hour_cn and now_cn.minute < max(1, full_sync_window_min)
                 )
-                if not running:
-                    job = crud.create_import_job(db, "lingxing_fbm")
-                    execute_sync_job(job.id)
+                if in_full_window:
+                    today_cn = now_cn.strftime("%Y-%m-%d")
+                    if _last_full_sync_date_cn != today_cn:
+                        if _run_sync(db, dict(lxcfg), full=True):
+                            _last_full_sync_date_cn = today_cn
         except Exception:
             pass
         finally:
             db.close()
-        time.sleep(interval_min * 60)
+        time.sleep(30)
 
 
 class UINoCacheMiddleware(BaseHTTPMiddleware):
