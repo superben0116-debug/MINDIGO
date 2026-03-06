@@ -29,6 +29,7 @@ from app.routers.customer_service import router as customer_service_router
 app = FastAPI(title="Ultimate ERP")
 _auto_sync_started = False
 _last_full_sync_date_cn = None
+_auto_sync_running = False
 
 
 def _is_truthy(v: str | None) -> bool:
@@ -56,32 +57,56 @@ def _auto_sync_loop():
     full_sync_hour_cn = int(os.getenv("ERP_DAILY_FULL_SYNC_HOUR_CN", "9") or "9")
     full_sync_window_min = int(os.getenv("ERP_DAILY_FULL_SYNC_WINDOW_MIN", "10") or "10")
     full_sync_rolling_days = int(os.getenv("ERP_DAILY_FULL_SYNC_ROLLING_DAYS", "120") or "120")
-    last_regular_run_at = 0.0
+    next_regular_run_at = time.time()
 
-    def _run_sync(db, cfg: dict, full: bool = False):
-        running = (
+    def _has_running_job(db):
+        return (
             db.query(models.ImportJob.id)
             .filter(
                 models.ImportJob.job_type == "lingxing_fbm",
                 models.ImportJob.status.in_(["queued", "running"]),
             )
             .first()
+            is not None
         )
-        if running:
+
+    def _run_sync_in_thread(full: bool = False):
+        global _auto_sync_running
+        if _auto_sync_running:
             return False
-        backup_cfg = None
-        try:
-            if full:
-                backup_cfg = dict(cfg)
-                cfg["auto_rolling_window"] = 1
-                cfg["rolling_days"] = max(30, full_sync_rolling_days)
-                crud.set_config(db, "lingxing", cfg)
-            job = crud.create_import_job(db, "lingxing_fbm")
-            execute_sync_job(job.id)
-            return True
-        finally:
-            if backup_cfg is not None:
-                crud.set_config(db, "lingxing", backup_cfg)
+        _auto_sync_running = True
+
+        def _worker():
+            global _auto_sync_running
+            dbw = SessionLocal()
+            backup_cfg = None
+            try:
+                cfg_obj = crud.get_config(dbw, "lingxing")
+                lxcfg = cfg_obj.config_value if cfg_obj and isinstance(cfg_obj.config_value, dict) else {}
+                if not _config_ready_for_sync(lxcfg):
+                    return
+                if _has_running_job(dbw):
+                    return
+                if full:
+                    backup_cfg = dict(lxcfg)
+                    lxcfg["auto_rolling_window"] = 1
+                    lxcfg["rolling_days"] = max(30, full_sync_rolling_days)
+                    crud.set_config(dbw, "lingxing", lxcfg)
+                job = crud.create_import_job(dbw, "lingxing_fbm")
+                execute_sync_job(job.id)
+            except Exception:
+                pass
+            finally:
+                if backup_cfg is not None:
+                    try:
+                        crud.set_config(dbw, "lingxing", backup_cfg)
+                    except Exception:
+                        pass
+                dbw.close()
+                _auto_sync_running = False
+
+        threading.Thread(target=_worker, daemon=True).start()
+        return True
 
     while True:
         db = SessionLocal()
@@ -91,10 +116,6 @@ def _auto_sync_loop():
             if _config_ready_for_sync(lxcfg):
                 now_ts = time.time()
                 now_cn = datetime.now(ZoneInfo("Asia/Shanghai"))
-                # 30分钟增量更新
-                if now_ts - last_regular_run_at >= interval_min * 60:
-                    if _run_sync(db, dict(lxcfg), full=False):
-                        last_regular_run_at = now_ts
                 # 每日北京时间9点全量更新（窗口内仅触发1次）
                 global _last_full_sync_date_cn
                 in_full_window = (
@@ -103,13 +124,18 @@ def _auto_sync_loop():
                 if in_full_window:
                     today_cn = now_cn.strftime("%Y-%m-%d")
                     if _last_full_sync_date_cn != today_cn:
-                        if _run_sync(db, dict(lxcfg), full=True):
+                        if _run_sync_in_thread(full=True):
                             _last_full_sync_date_cn = today_cn
+                # 30分钟增量更新（严格按周期触发，若任务耗时则下一轮在空闲后立即补跑）
+                if now_ts >= next_regular_run_at:
+                    if _run_sync_in_thread(full=False):
+                        while next_regular_run_at <= now_ts:
+                            next_regular_run_at += interval_min * 60
         except Exception:
             pass
         finally:
             db.close()
-        time.sleep(30)
+        time.sleep(15)
 
 
 class UINoCacheMiddleware(BaseHTTPMiddleware):
