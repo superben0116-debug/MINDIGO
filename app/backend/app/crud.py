@@ -27,6 +27,10 @@ _BUYER_STICKY_FIELDS = {
     "postal_code",
 }
 
+_POLICY_LIMIT_MARKERS = (
+    "应亚马逊政策要求，仅返回订购时间28天内数据",
+)
+
 
 def _is_blank_like(value) -> bool:
     if value is None:
@@ -37,6 +41,8 @@ def _is_blank_like(value) -> bool:
             return True
         low = txt.lower()
         if low in {"none", "null", "nan"}:
+            return True
+        if any(marker in txt for marker in _POLICY_LIMIT_MARKERS):
             return True
         if txt in {"None, None", "none, none"}:
             return True

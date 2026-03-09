@@ -42,6 +42,9 @@ SHOP_NAME_MAP = {
     "译文-US": "译文",
 }
 DEFAULT_EXCHANGE_RATE = 7.0
+_POLICY_LIMIT_MARKERS = (
+    "应亚马逊政策要求，仅返回订购时间28天内数据",
+)
 
 
 def _map_shop_name(v: str | None) -> str:
@@ -66,6 +69,9 @@ def _get_exchange_rate(db: Session) -> float:
 def _needs_address_refresh(order: models.InternalOrder, ext_fields: dict) -> bool:
     if not order.platform_order_no:
         return False
+    joined = "\n".join(str(v or "") for v in (ext_fields or {}).values())
+    if any(marker in joined for marker in _POLICY_LIMIT_MARKERS):
+        return True
     checks = [
         ext_fields.get("address_line1"),
         ext_fields.get("city"),
@@ -126,6 +132,8 @@ def _clean_text(v: Any) -> str:
     if v is None:
         return ""
     s = str(v).strip()
+    if any(marker in s for marker in _POLICY_LIMIT_MARKERS):
+        return ""
     return "" if s.lower() in ("none", "null", "nan") else s
 
 

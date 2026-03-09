@@ -23,12 +23,18 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 import time
 
+_POLICY_LIMIT_MARKERS = (
+    "应亚马逊政策要求，仅返回订购时间28天内数据",
+)
+
 
 def _clean(v):
     if v is None:
         return None
     s = str(v).strip()
     if not s or s.lower() in ("none", "null", "nan"):
+        return None
+    if any(marker in s for marker in _POLICY_LIMIT_MARKERS):
         return None
     return s
 
@@ -232,6 +238,49 @@ def _bulk_enrich_recent_missing_addresses(
             except Exception as exc:
                 if job_id is not None:
                     crud.add_import_log(db, job_id, "error", f"bulk address enrich sid={sid} exception={exc}")
+    return updated
+
+
+def _bulk_repair_policy_limited_addresses(
+    db: Session,
+    access_token: str,
+    app_id: str,
+    limit: int = 2000,
+    job_id: int | None = None,
+):
+    candidates = []
+    ext_rows = (
+        db.query(models.InternalOrderExt)
+        .order_by(models.InternalOrderExt.internal_order_id.desc())
+        .limit(limit)
+        .all()
+    )
+    for ext_obj in ext_rows:
+        fields = dict(ext_obj.fields or {})
+        joined = "\n".join(str(v or "") for v in fields.values())
+        if any(marker in joined for marker in _POLICY_LIMIT_MARKERS):
+            order = crud.get_internal_order(db, ext_obj.internal_order_id)
+            if order and order.platform_order_no:
+                candidates.append(str(order.platform_order_no).strip())
+            # clear poisoned values so they don't keep rendering as fake addresses
+            cleaned = {}
+            for k, v in fields.items():
+                if isinstance(v, str) and any(marker in v for marker in _POLICY_LIMIT_MARKERS):
+                    continue
+                cleaned[k] = v
+            if cleaned != fields:
+                ext_obj.fields = cleaned
+                db.add(ext_obj)
+                db.commit()
+    updated = 0
+    deduped = [x for x in dict.fromkeys(candidates) if x]
+    for i in range(0, len(deduped), 200):
+        batch = deduped[i:i + 200]
+        try:
+            updated += _enrich_orders_from_mp_list(db, access_token, app_id, "", batch, job_id=job_id)
+        except Exception as exc:
+            if job_id is not None:
+                crud.add_import_log(db, job_id, "error", f"policy address repair batch exception={exc}")
     return updated
 
 
@@ -1003,6 +1052,11 @@ def execute_sync_job(job_id: int) -> Dict:
             crud.add_import_log(db, job_id, "info", f"bulk address enrich completed count={addr_updated}")
         except Exception as exc:
             crud.add_import_log(db, job_id, "error", f"bulk address enrich error={exc}")
+        try:
+            repaired = _bulk_repair_policy_limited_addresses(db, access_token, app_id, limit=2000, job_id=job_id)
+            crud.add_import_log(db, job_id, "info", f"policy address repair completed count={repaired}")
+        except Exception as exc:
+            crud.add_import_log(db, job_id, "error", f"policy address repair error={exc}")
         return result
     except Exception as exc:
         crud.update_import_job(db, job_id, 0, 1, "failed", error_summary=str(exc))
