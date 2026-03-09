@@ -440,6 +440,10 @@
       function buildAddress(base, ext) {
         const name = String(ext.receiver_name || ext.buyer_name || "").trim();
         const line1 = String(ext.address_line1 || "").trim();
+        const line2 = String(ext.address_line2 || "").trim();
+        const line3 = String(ext.address_line3 || "").trim();
+        const district = String(ext.district || "").trim();
+        const doorplate = String(ext.doorplate_no || "").trim();
         const city = String(ext.city || "").trim();
         const state = String(ext.state_or_region || "").trim();
         const zip = String(ext.postal_code || "").trim();
@@ -451,9 +455,13 @@
         // 优先使用结构化字段，避免历史脏地址出现重复“电话/国家”
         if (name || line1 || city || state || zip) {
           const cityLine = [city, state].filter(Boolean).join(", ") + (zip ? ` ${zip}` : "");
+          const middleLines = [line2, line3].filter(Boolean);
+          const tailLine = [district, doorplate].filter(Boolean).join(" ").trim();
+          if (tailLine) middleLines.push(tailLine);
           return [
             name,
             line1,
+            ...middleLines,
             cityLine.trim(),
             country,
             addrType ? `地址类型:  ${addrType}` : "",
