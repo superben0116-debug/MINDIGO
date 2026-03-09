@@ -938,8 +938,13 @@ def enrich_fbm_addresses(payload: dict, db: Session = Depends(get_db)):
                 ext_update["联邦方式"] = fbm_logi.get("carrier_hint")
             if fbm_logi.get("shipment_date") and not ext_update.get("发货日"):
                 ext_update["发货日"] = fbm_logi.get("shipment_date")
-        # if detail missing address, fallback to mp order list by platform order no
-        if not ext_update.get("address_line1") and (target_no):
+        # 只要地址关键信息有缺口，就回查 mp order list。
+        # 之前只判断 address_line1，导致 line2/line3 缺失时不会补。
+        needs_address_enrich = bool(target_no) and any(
+            not _clean(ext_update.get(k))
+            for k in ("address_line1", "address_line2", "address_line3", "city", "state_or_region", "postal_code")
+        )
+        if needs_address_enrich:
             if mp_row_hit:
                 row = mp_row_hit
                 ext_update.update(build_ext_from_mp_row(row))

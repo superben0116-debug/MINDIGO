@@ -170,6 +170,48 @@ def _enrich_orders_from_mp_list(
     return updated
 
 
+def _bulk_enrich_recent_missing_addresses(
+    db: Session,
+    access_token: str,
+    app_id: str,
+    sid_list: list[str],
+    limit: int = 500,
+    job_id: int | None = None,
+):
+    recent_orders = (
+        db.query(models.InternalOrder)
+        .filter(models.InternalOrder.platform_order_no.isnot(None))
+        .order_by(models.InternalOrder.id.desc())
+        .limit(limit)
+        .all()
+    )
+    orders_by_sid: dict[str, list[str]] = {}
+    for order in recent_orders:
+        ext_obj = crud.get_order_ext(db, order.id)
+        fields = ext_obj.fields if ext_obj else {}
+        need = any(
+            not _clean(fields.get(k))
+            for k in ("address_line1", "address_line2", "city", "state_or_region", "postal_code", "客户地址")
+        )
+        if not need:
+            continue
+        sid = _clean(fields.get("店铺ID"))
+        if not sid or sid not in sid_list:
+            continue
+        orders_by_sid.setdefault(sid, []).append(str(order.platform_order_no).strip())
+
+    updated = 0
+    for sid, order_nos in orders_by_sid.items():
+        for i in range(0, len(order_nos), 200):
+            batch = order_nos[i:i + 200]
+            try:
+                updated += _enrich_orders_from_mp_list(db, access_token, app_id, sid, batch, job_id=job_id)
+            except Exception as exc:
+                if job_id is not None:
+                    crud.add_import_log(db, job_id, "error", f"bulk address enrich sid={sid} exception={exc}")
+    return updated
+
+
 def _iter_time_windows(start: datetime, end: datetime, days: int):
     cur = start
     while cur <= end:
@@ -933,6 +975,11 @@ def execute_sync_job(job_id: int) -> Dict:
             crud.add_import_log(db, job_id, "info", "auto backfill completed")
         except Exception as exc:
             crud.add_import_log(db, job_id, "error", f"auto backfill error={exc}")
+        try:
+            addr_updated = _bulk_enrich_recent_missing_addresses(db, access_token, app_id, sid_list, limit=1000, job_id=job_id)
+            crud.add_import_log(db, job_id, "info", f"bulk address enrich completed count={addr_updated}")
+        except Exception as exc:
+            crud.add_import_log(db, job_id, "error", f"bulk address enrich error={exc}")
         return result
     except Exception as exc:
         crud.update_import_job(db, job_id, 0, 1, "failed", error_summary=str(exc))
