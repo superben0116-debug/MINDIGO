@@ -3,6 +3,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from app.db import SessionLocal
 from app import crud, models
+from app.services import _enrich_orders_from_mp_list
 from app.quote_templates import build_supplier_visible_payload
 from app.integrations.lingxing_client import update_fbm_order, get_access_token, get_listing_search, get_shop_list, get_mws_order_detail
 from app.config_store import get_lingxing_config
@@ -60,6 +61,51 @@ def _get_exchange_rate(db: Session) -> float:
         except Exception:
             pass
     return DEFAULT_EXCHANGE_RATE
+
+
+def _needs_address_refresh(order: models.InternalOrder, ext_fields: dict) -> bool:
+    if not order.platform_order_no:
+        return False
+    checks = [
+        ext_fields.get("address_line1"),
+        ext_fields.get("city"),
+        ext_fields.get("state_or_region"),
+        ext_fields.get("postal_code"),
+        ext_fields.get("客户地址"),
+        ext_fields.get("电话") or ext_fields.get("receiver_mobile") or ext_fields.get("receiver_tel"),
+    ]
+    if any(not _clean_text(v) for v in checks):
+        return True
+    # address_line2 是可选的，但若缺失则仍尝试回查，避免像 Unit A 这类二行地址长期漏掉
+    return not _clean_text(ext_fields.get("address_line2"))
+
+
+def _maybe_enrich_orders_for_view(db: Session, orders: list[models.InternalOrder]) -> None:
+    if not orders:
+        return
+    pending = []
+    for order in orders:
+        ext_obj = crud.get_order_ext(db, order.id)
+        ext_fields = dict(ext_obj.fields or {}) if ext_obj and isinstance(ext_obj.fields, dict) else {}
+        if _needs_address_refresh(order, ext_fields):
+            pending.append(order.platform_order_no)
+    pending = [x for x in dict.fromkeys(pending) if x]
+    if not pending:
+        return
+    cfg = get_lingxing_config(db)
+    app_id = str(cfg.get("app_id") or "").strip()
+    app_secret = str(cfg.get("app_secret") or "").strip()
+    if not app_id or not app_secret:
+        return
+    token = get_access_token(app_id, app_secret)
+    token_code = str(token.get("code"))
+    if token_code not in ("0", "200"):
+        return
+    access_token = ((token.get("data") or {}).get("access_token") or "").strip()
+    if not access_token:
+        return
+    for i in range(0, len(pending), 200):
+        _enrich_orders_from_mp_list(db, access_token, app_id, "", pending[i:i+200])
 
 
 def _to_ymd(v):
@@ -646,6 +692,7 @@ def _extract_kapi_order_no(fields: dict) -> str:
 @router.get("/")
 def list_internal_orders(limit: int = 50, offset: int = 0, db: Session = Depends(get_db)):
     orders = crud.list_internal_orders(db, limit=limit, offset=offset)
+    _maybe_enrich_orders_for_view(db, orders)
     items = []
     cfg = get_lingxing_config(db)
     app_id = str(cfg.get("app_id") or cfg.get("APP_ID") or "").strip()
@@ -1439,6 +1486,7 @@ def get_internal_order(internal_order_id: int, db: Session = Depends(get_db)):
     order = crud.get_internal_order(db, internal_order_id)
     if not order:
         raise HTTPException(status_code=404, detail="order not found")
+    _maybe_enrich_orders_for_view(db, [order])
     items = crud.get_order_items(db, internal_order_id)
     packages = crud.get_order_packages(db, internal_order_id)
     ext = crud.get_order_ext(db, internal_order_id)

@@ -164,7 +164,27 @@ def _enrich_orders_from_mp_list(
         # 仅保留有值字段，避免覆盖已有正确值
         ext = {k: v for k, v in ext.items() if v not in (None, "", "None", "null")}
         if ext:
+            if line1:
+                order.customer_address_line1 = line1
+            if line2:
+                order.customer_address_line2 = line2
+            if city:
+                order.customer_city = city
+            if state:
+                order.customer_state = state
+            if zip5:
+                order.customer_zip = zip5
+            if country_code:
+                order.customer_country = _country_name(country_code)
+            if name:
+                order.customer_name = name
+            if phone:
+                order.customer_phone = phone
+            if ext.get("客户地址"):
+                order.customer_address_summary = ext.get("客户地址")
             crud.upsert_order_ext_bulk(db, order.id, ext)
+            db.add(order)
+            db.commit()
             updated += 1
     return updated
 
