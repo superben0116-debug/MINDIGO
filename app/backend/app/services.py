@@ -121,7 +121,8 @@ def _enrich_orders_from_mp_list(
         zip5 = _clean(addr.get("postal_code"))
         country_code = _clean(addr.get("receiver_country_code"))
         phone = _clean(addr.get("receiver_mobile") or addr.get("receiver_tel"))
-        buyer_name = _clean(row.get("buyer_name")) or name
+        buyers_info = row.get("buyers_info") or {}
+        buyer_name = _clean(row.get("buyer_name")) or _clean(buyers_info.get("buyer_name")) or name
         address_type = "住宅" if str(row.get("address_type") or "1") == "1" else "商业地址"
 
         city_line = ", ".join([x for x in [city, state] if x])
