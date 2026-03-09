@@ -437,6 +437,13 @@
         if (["2", "商业地址", "商业", "Business", "business"].includes(s)) return "商业地址";
         return s;
       }
+      function displayBuyerName(v) {
+        const s = String(v || "").trim();
+        if (!s) return "";
+        const parts = s.split(/\s+/).filter(Boolean);
+        if (parts.length >= 2) return parts[0];
+        return s;
+      }
       function buildAddress(base, ext) {
         const name = String(ext.receiver_name || ext.buyer_name || "").trim();
         const line1 = String(ext.address_line1 || "").trim();
@@ -449,7 +456,7 @@
         const zip = String(ext.postal_code || "").trim();
         const country = countryZh(ext.receiver_country_code || ext.country_code);
         const addrType = addressTypeZh(ext.address_type);
-        const buyer = String(ext.buyer_name || "").trim();
+        const buyer = displayBuyerName(ext.buyer_name || "");
         const phone = String(ext["电话"] || ext.receiver_mobile || ext.receiver_tel || "").trim();
 
         // 优先使用结构化字段，避免历史脏地址出现重复“电话/国家”

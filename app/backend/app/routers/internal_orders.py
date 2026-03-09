@@ -152,6 +152,21 @@ def _address_type_zh(v: Any) -> str:
     return raw
 
 
+def _display_buyer_name(v: Any, receiver_name: Any = None) -> str:
+    buyer = _clean_text(v)
+    if not buyer:
+        return ""
+    parts = [p for p in re.split(r"\s+", buyer) if p]
+    if not parts:
+        return buyer
+    receiver = _clean_text(receiver_name)
+    # Amazon 页面常显示买家联系名的首词，如 "Daniel Waknine" -> "Daniel"
+    # 原始全名仍保留在结构化字段 buyer_name 中，这里只做展示缩写。
+    if len(parts) >= 2:
+        return parts[0]
+    return buyer
+
+
 def _format_customer_address_block(fields: dict) -> str:
     name = _clean_text(fields.get("receiver_name") or fields.get("buyer_name") or fields.get("customer_name"))
     line1 = _clean_text(fields.get("address_line1"))
@@ -168,7 +183,7 @@ def _format_customer_address_block(fields: dict) -> str:
         addr_type = _address_type_zh(fields.get("address_type_name"))
     if not addr_type:
         addr_type = "住宅"
-    buyer = _clean_text(fields.get("buyer_name"))
+    buyer = _display_buyer_name(fields.get("buyer_name"), name)
     phone = _clean_text(fields.get("电话") or fields.get("receiver_mobile") or fields.get("receiver_tel"))
 
     city_line = f"{city}, {state}".strip(", ")
