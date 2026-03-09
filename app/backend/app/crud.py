@@ -15,6 +15,8 @@ _BUYER_STICKY_FIELDS = {
     "电话",
     "buyer_email",
     "receiver_country_code",
+    "address_type",
+    "address_type_name",
     "address_line1",
     "address_line2",
     "address_line3",

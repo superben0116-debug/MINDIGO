@@ -434,7 +434,7 @@
         const s = String(v || "").trim();
         if (!s) return "";
         if (["1", "住宅", "Residential", "residential"].includes(s)) return "住宅";
-        if (["2", "商业地址", "商业", "Business", "business"].includes(s)) return "商业地址";
+        if (["2", "办公", "商业地址", "商业", "Business", "business", "Office", "office"].includes(s)) return "办公";
         return s;
       }
       function displayBuyerName(v) {

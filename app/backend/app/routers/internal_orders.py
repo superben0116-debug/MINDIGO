@@ -147,8 +147,8 @@ def _address_type_zh(v: Any) -> str:
         return ""
     if raw in ("1", "住宅", "Residential", "residential"):
         return "住宅"
-    if raw in ("2", "商业地址", "商业", "Business", "business"):
-        return "商业地址"
+    if raw in ("2", "办公", "商业地址", "商业", "Business", "business", "Office", "office"):
+        return "办公"
     return raw
 
 

@@ -123,7 +123,8 @@ def _enrich_orders_from_mp_list(
         phone = _clean(addr.get("receiver_mobile") or addr.get("receiver_tel"))
         buyers_info = row.get("buyers_info") or {}
         buyer_name = _clean(row.get("buyer_name")) or _clean(buyers_info.get("buyer_name")) or name
-        address_type = "住宅" if str(row.get("address_type") or "1") == "1" else "商业地址"
+        address_type_raw = _clean(row.get("address_type"))
+        address_type = "住宅" if str(address_type_raw or "1") == "1" else "办公"
 
         city_line = ", ".join([x for x in [city, state] if x])
         if zip5:
@@ -149,6 +150,8 @@ def _enrich_orders_from_mp_list(
             "receiver_mobile": phone,
             "电话": phone,
             "buyer_name": buyer_name,
+            "address_type": address_type_raw or ("1" if address_type == "住宅" else "2"),
+            "address_type_name": address_type,
             "客户地址": "\n".join([x for x in customer_lines if x]),
             "出单日期": _to_ymd(row.get("global_purchase_time")),
             "发货日": _to_ymd(row.get("global_delivery_time") or row.get("global_latest_ship_time")),
