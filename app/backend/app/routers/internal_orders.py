@@ -109,6 +109,10 @@ def _address_type_zh(v: Any) -> str:
 def _format_customer_address_block(fields: dict) -> str:
     name = _clean_text(fields.get("receiver_name") or fields.get("buyer_name") or fields.get("customer_name"))
     line1 = _clean_text(fields.get("address_line1"))
+    line2 = _clean_text(fields.get("address_line2"))
+    line3 = _clean_text(fields.get("address_line3"))
+    district = _clean_text(fields.get("district"))
+    doorplate = _clean_text(fields.get("doorplate_no"))
     city = _clean_text(fields.get("city") or fields.get("customer_city"))
     state = _clean_text(fields.get("state_or_region") or fields.get("customer_state"))
     postal = _clean_text(fields.get("postal_code") or fields.get("customer_zip"))
@@ -124,10 +128,15 @@ def _format_customer_address_block(fields: dict) -> str:
     city_line = f"{city}, {state}".strip(", ")
     if postal:
         city_line = f"{city_line} {postal}".strip()
+    middle_lines = [x for x in [line2, line3] if x]
+    tail_line = " ".join([x for x in [district, doorplate] if x]).strip()
+    if tail_line:
+        middle_lines.append(tail_line)
 
     rows = [
         name,
         line1,
+        *middle_lines,
         city_line,
         country,
         f"地址类型:  {addr_type}" if addr_type else "",
