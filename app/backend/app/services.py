@@ -70,9 +70,8 @@ def _enrich_orders_from_mp_list(
         return 0
     payload = {
         "offset": 0,
-        "length": min(200, len(order_nos)),
+        "length": max(20, min(200, len(order_nos))),
         "platform_code": [10001],
-        "store_id": [str(sid)],
         "platform_order_nos": order_nos[:200],
     }
     res = get_mp_order_list(access_token, app_id, payload)
