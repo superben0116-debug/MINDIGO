@@ -63,6 +63,29 @@ def _country_name(code: str | None) -> str:
     return {"US": "美国", "CA": "加拿大", "CN": "中国"}.get(c, c or "")
 
 
+def _meaningful_address_lines(text: str | None) -> list[str]:
+    out = []
+    for raw in str(text or "").replace("\r", "\n").split("\n"):
+        line = raw.strip()
+        if not line:
+            continue
+        if any(marker in line for marker in _POLICY_LIMIT_MARKERS):
+            continue
+        out.append(line)
+    return out
+
+
+def _prefer_richer_customer_address(old_addr: str | None, new_addr: str | None) -> str | None:
+    old_lines = _meaningful_address_lines(old_addr)
+    new_lines = _meaningful_address_lines(new_addr)
+    if not new_lines:
+        return "\n".join(old_lines) if old_lines else None
+    # 旧地址如果更完整（例如多了一行公司名/二行地址），保留旧地址
+    if len(old_lines) > len(new_lines):
+        return "\n".join(old_lines)
+    return "\n".join(new_lines)
+
+
 def _enrich_orders_from_mp_list(
     db: Session,
     access_token: str,
@@ -119,6 +142,7 @@ def _enrich_orders_from_mp_list(
             addr = raw_addr
 
         name = _clean(addr.get("receiver_name"))
+        company = _clean(addr.get("company_name"))
         line1 = _clean(addr.get("address_line1"))
         line2 = _clean(addr.get("address_line2"))
         line3 = _clean(addr.get("address_line3"))
@@ -135,7 +159,10 @@ def _enrich_orders_from_mp_list(
         city_line = ", ".join([x for x in [city, state] if x])
         if zip5:
             city_line = f"{city_line} {zip5}".strip()
-        customer_lines = [x for x in [name, line1, " ".join([x for x in [line2, line3] if x]).strip(), city_line] if x]
+        current_ext_obj = crud.get_order_ext(db, order.id)
+        current_fields = dict(current_ext_obj.fields or {}) if current_ext_obj else {}
+
+        customer_lines = [x for x in [name, company, line1, " ".join([x for x in [line2, line3] if x]).strip(), city_line] if x]
         if country_code:
             customer_lines.append(_country_name(country_code))
         customer_lines.append(f"地址类型:  {address_type}")
@@ -158,7 +185,7 @@ def _enrich_orders_from_mp_list(
             "buyer_name": buyer_name,
             "address_type": address_type_raw or ("1" if address_type == "住宅" else "2"),
             "address_type_name": address_type,
-            "客户地址": "\n".join([x for x in customer_lines if x]),
+            "客户地址": _prefer_richer_customer_address(current_fields.get("客户地址"), "\n".join([x for x in customer_lines if x])),
             "出单日期": _to_ymd(row.get("global_purchase_time")),
             "发货日": _to_ymd(row.get("global_delivery_time") or row.get("global_latest_ship_time")),
         }
