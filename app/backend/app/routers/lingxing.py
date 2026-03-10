@@ -999,6 +999,9 @@ def enrich_fbm_addresses(payload: dict, db: Session = Depends(get_db)):
             if v in ("", " "):
                 continue
             oldv = _clean(fields.get(k))
+            if k in {"发货日", "送达日", "出单日期"} and oldv != v:
+                final_update[k] = v
+                continue
             if force_refresh and k in force_keys and oldv != v:
                 final_update[k] = v
                 continue

@@ -298,7 +298,7 @@ def get_mws_orders(
     return resp.json()
 
 
-def get_mws_order_detail(access_token: str, app_id: str, order_ids: list[str]):
+def get_mws_order_detail(access_token: str, app_id: str, order_ids: list[str] | str):
     url = f"{API_BASE}/erp/sc/data/mws/orderDetail"
     timestamp = int(time.time())
     common = {
@@ -306,6 +306,8 @@ def get_mws_order_detail(access_token: str, app_id: str, order_ids: list[str]):
         "app_key": app_id,
         "timestamp": str(timestamp),
     }
+    if isinstance(order_ids, str):
+        order_ids = [order_ids]
     body = {
         "order_id": ",".join(order_ids),
     }
