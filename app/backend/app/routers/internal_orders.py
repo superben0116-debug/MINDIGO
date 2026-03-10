@@ -122,6 +122,12 @@ def _to_ymd(v):
     s = str(v).strip()
     if not s:
         return ""
+    if "T" in s and (s.endswith("Z") or "+" in s):
+        try:
+            dt = datetime.fromisoformat(s.replace("Z", "+00:00")).astimezone(ZoneInfo("America/Los_Angeles"))
+            return f"{dt.year}/{dt.month}/{dt.day}"
+        except Exception:
+            pass
     dt = _parse_any_datetime(s)
     if dt is not None:
         return f"{dt.year}/{dt.month}/{dt.day}"
@@ -260,6 +266,11 @@ def _parse_any_datetime(v):
     s = str(v).strip()
     if not s:
         return None
+    if "T" in s and (s.endswith("Z") or "+" in s):
+        try:
+            return datetime.fromisoformat(s.replace("Z", "+00:00")).astimezone(ZoneInfo("America/Los_Angeles"))
+        except Exception:
+            pass
     s = s.replace("T", " ").replace("Z", "").strip()
     s = re.sub(r"\s+", " ", s)
     for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
@@ -280,7 +291,7 @@ def _format_zh_date(v):
     dt = _parse_any_datetime(v)
     if not dt:
         return str(v or "").strip()
-    la = dt.replace(tzinfo=ZoneInfo("America/Los_Angeles"))
+    la = dt.astimezone(ZoneInfo("America/Los_Angeles")) if dt.tzinfo else dt.replace(tzinfo=ZoneInfo("America/Los_Angeles"))
     return f"{la.year}年{la.month}月{la.day}日{_to_zh_weekday(la)} {_to_zh_tz(la)}"
 
 

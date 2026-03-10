@@ -48,10 +48,12 @@ def _to_ymd(v):
             ts = int(v)
             if ts > 10_000_000_000:  # 毫秒级
                 ts = ts // 1000
-            return datetime.fromtimestamp(ts).strftime("%Y-%m-%d")
+            return datetime.fromtimestamp(ts, tz=ZoneInfo("UTC")).astimezone(ZoneInfo("America/Los_Angeles")).strftime("%Y-%m-%d")
         s = str(v).strip()
+        if "T" in s and (s.endswith("Z") or "+" in s):
+            iso = s.replace("Z", "+00:00")
+            return datetime.fromisoformat(iso).astimezone(ZoneInfo("America/Los_Angeles")).strftime("%Y-%m-%d")
         if "T" in s:
-            s = s.replace("Z", "")
             return datetime.fromisoformat(s[:19]).strftime("%Y-%m-%d")
         return datetime.strptime(s[:19], "%Y-%m-%d %H:%M:%S").strftime("%Y-%m-%d")
     except Exception:
