@@ -302,6 +302,19 @@ def _format_zh_date_range(v):
     return s
 
 
+def _derive_delivery_range(ext: dict) -> str:
+    raw = ext.get("送达日") or ext.get("amz_deliver") or ext.get("delivery_range") or ""
+    if str(raw or "").strip():
+        return _format_zh_date_range(raw)
+    e = _clean_text(ext.get("earliest_delivery_date"))
+    l = _clean_text(ext.get("latest_delivery_date"))
+    if e and l:
+        return _format_zh_date_range(f"{e} - {l}")
+    if e or l:
+        return _format_zh_date_range(e or l)
+    return ""
+
+
 def _split_product_name_and_code(v: str):
     s = str(v or "").strip()
     if not s:
@@ -1037,7 +1050,7 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
         if not region:
             zip5 = str(ext.get("postal_code") or "").strip() or _extract_zip_from_address(customer_addr)
             region = _zip_to_region(zip5)
-        delivery = _format_zh_date_range(ext.get("送达日") or ext.get("amz_deliver") or "")
+        delivery = _derive_delivery_range(ext)
         ship = _format_zh_date(ext.get("发货日") or ext.get("latest_ship_date") or ext.get("amz_ship"))
         for g in grouped.values():
             ext_formatted_name = str(ext.get("产品名") or "").strip()
