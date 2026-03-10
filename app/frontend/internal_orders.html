@@ -527,14 +527,17 @@
           month: "numeric",
           day: "numeric",
           weekday: "short",
-          timeZoneName: "short",
         });
         const parts = fmt.formatToParts(d);
         const map = {};
         parts.forEach((p) => { map[p.type] = (map[p.type] || "") + p.value; });
         const weekMap = { "周日": "周日", "周一": "周一", "周二": "周二", "周三": "周三", "周四": "周四", "周五": "周五", "周六": "周六" };
-        const tzRaw = String(map.timeZoneName || "").toUpperCase();
-        const tz = tzRaw.includes("DT") ? "PDT" : "PST";
+        const tzParts = new Intl.DateTimeFormat("en-US", {
+          timeZone: "America/Los_Angeles",
+          timeZoneName: "short",
+        }).formatToParts(d);
+        const tzRaw = String((tzParts.find((p) => p.type === "timeZoneName") || {}).value || "").toUpperCase();
+        const tz = tzRaw === "PDT" ? "PDT" : "PST";
         const week = weekMap[map.weekday] || map.weekday || "";
         return {
           year: Number(map.year || d.getFullYear()),
