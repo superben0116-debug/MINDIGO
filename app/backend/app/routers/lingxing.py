@@ -658,7 +658,6 @@ def enrich_fbm_addresses(payload: dict, db: Session = Depends(get_db)):
                 ext["发货日"] = _to_ymd(ship_ts)
             except Exception:
                 ext["发货日"] = _to_ymd(ship_ts)
-        deliver_ts = None
         pinfo = row.get("platform_info") or []
         if pinfo and isinstance(pinfo, list):
             # keep first platform_info raw fields
@@ -679,12 +678,9 @@ def enrich_fbm_addresses(payload: dict, db: Session = Depends(get_db)):
                 ext["出单日期"] = _to_ymd(p0.get("purchase_time"))
             if p0.get("latest_ship_time") and not ext.get("发货日"):
                 ext["发货日"] = _to_ymd(p0.get("latest_ship_time"))
-            deliver_ts = pinfo[0].get("delivery_time")
-        if deliver_ts:
-            try:
-                ext["送达日"] = _to_ymd(deliver_ts)
-            except Exception:
-                ext["送达日"] = _to_ymd(deliver_ts)
+        # IMPORTANT:
+        # platform_info.delivery_time 不是 Amazon 承诺送达区间，很多场景为空或语义不一致。
+        # 送达日只接受 MWS detail 的 earliest/latest_delivery_date，避免写错。
         # order tags
         tags = row.get("order_tag") or []
         if tags:
