@@ -1421,6 +1421,9 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
             # 4行补公式：模板部分共享公式在xml中会丢失，按列规则强制补齐R1-R4
             if use_4:
                 c_ag = header_map.get("头程运费总价")
+                c_ai = header_map.get("出库费")
+                c_ak = header_map.get("其他")
+                c_al = header_map.get("每套运费成本")
                 c_ae = header_map.get("计费重量")
                 c_af = header_map.get("花街单价")
                 c_an = header_map.get("长cm")
@@ -1451,6 +1454,18 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
                         ws.cell(rr, c_bn).value = f"={get_column_letter(c_aq)}{rr}+2*({get_column_letter(c_ar)}{rr}+{get_column_letter(c_as)}{rr})"
                     if c_bo and c_an and c_ao and c_ap:
                         ws.cell(rr, c_bo).value = f"={get_column_letter(c_an)}{rr}+2*({get_column_letter(c_ao)}{rr}+{get_column_letter(c_ap)}{rr})"
+                if c_al and c_ag:
+                    r = start_row
+                    tail = start_row + 3
+                    parts = [f"{get_column_letter(c_ag)}{r}"]
+                    if c_ai:
+                        parts.append(f"{get_column_letter(c_ai)}{r}")
+                    if c_ak:
+                        parts.append(f"{get_column_letter(c_ak)}{r}")
+                    parts.append(f"{get_column_letter(c_ag)}{r+1}")
+                    parts.append(f"{get_column_letter(c_ag)}{r+2}")
+                    ws.cell(r, c_al).value = "=" + "+".join(parts)
+                    ws.cell(tail, c_al).value = f"={get_column_letter(c_ag)}{tail}"
             # split lines
             name_col = header_map.get("产品名")
             marks_col = header_map.get("箱唛")

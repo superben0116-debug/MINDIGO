@@ -714,6 +714,16 @@ def run_mws_orders_job(
                                         ext_update["sku"] = sku_val
                                     if it.get("product_name") or it.get("title"):
                                         ext_update["product_name"] = it.get("product_name") or it.get("title")
+                                if d.get("latest_ship_date"):
+                                    ext_update["latest_ship_date"] = d.get("latest_ship_date")
+                                    ext_update["amz_ship"] = d.get("latest_ship_date")
+                                if d.get("earliest_delivery_date"):
+                                    ext_update["earliest_delivery_date"] = d.get("earliest_delivery_date")
+                                if d.get("latest_delivery_date"):
+                                    ext_update["latest_delivery_date"] = d.get("latest_delivery_date")
+                                    ext_update["amz_deliver"] = f"{d.get('earliest_delivery_date','')} - {d.get('latest_delivery_date','')}".strip(" -")
+                                if d.get("purchase_date_local"):
+                                    ext_update["purchase_date_local"] = d.get("purchase_date_local")
                                 first_item = (d.get("item_list") or [])[:1]
                                 if first_item:
                                     img = first_item[0].get("pic_url")
