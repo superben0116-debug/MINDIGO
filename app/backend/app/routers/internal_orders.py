@@ -1527,12 +1527,7 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
                     parts.append(f"{get_column_letter(c_ag)}{r+1}")
                     parts.append(f"{get_column_letter(c_ag)}{r+2}")
                     ws.cell(r, c_al).value = "=" + "+".join(parts)
-                    tail_parts = [f"{get_column_letter(c_ag)}{tail}"]
-                    if c_ai:
-                        tail_parts.append(f"{get_column_letter(c_ai)}{tail}")
-                    if c_ak:
-                        tail_parts.append(f"{get_column_letter(c_ak)}{tail}")
-                    ws.cell(tail, c_al).value = "=" + "+".join(tail_parts)
+                    ws.cell(tail, c_al).value = f"={get_column_letter(c_ag)}{tail}"
             # split lines
             name_col = header_map.get("产品名")
             marks_col = header_map.get("箱唛")
