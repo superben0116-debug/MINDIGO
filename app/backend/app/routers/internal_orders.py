@@ -1517,16 +1517,21 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
                 if c_al and c_ag:
                     r = start_row
                     tail = start_row + 3
-                    def _cost_terms(rr: int) -> list[str]:
-                        vals = [f"{get_column_letter(c_ag)}{rr}"]
-                        if c_ai:
-                            vals.append(f"{get_column_letter(c_ai)}{rr}")
-                        if c_ak:
-                            vals.append(f"{get_column_letter(c_ak)}{rr}")
-                        return vals
-                    parts = _cost_terms(r) + _cost_terms(r + 1) + _cost_terms(r + 2)
+                    parts = [f"{get_column_letter(c_ag)}{r}"]
+                    if c_ai:
+                        parts.append(f"{get_column_letter(c_ai)}{r}")
+                    if c_ak:
+                        parts.append(f"{get_column_letter(c_ak)}{r}")
+                    # 4行模板中 AI/AK 位于合并行，仅首行保留；R1-R3 的 AG 需要按三行数量累计
+                    parts.append(f"{get_column_letter(c_ag)}{r}")
+                    parts.append(f"{get_column_letter(c_ag)}{r}")
                     ws.cell(r, c_al).value = "=" + "+".join(parts)
-                    ws.cell(tail, c_al).value = "=" + "+".join(_cost_terms(tail))
+                    tail_parts = [f"{get_column_letter(c_ag)}{tail}"]
+                    if c_ai:
+                        tail_parts.append(f"{get_column_letter(c_ai)}{tail}")
+                    if c_ak:
+                        tail_parts.append(f"{get_column_letter(c_ak)}{tail}")
+                    ws.cell(tail, c_al).value = "=" + "+".join(tail_parts)
             # split lines
             name_col = header_map.get("产品名")
             marks_col = header_map.get("箱唛")
