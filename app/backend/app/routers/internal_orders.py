@@ -1480,10 +1480,11 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
                     ws.cell(rr, c_bf).value = f"={get_column_letter(c_be)}{rr}*{rate_text}-{get_column_letter(c_bd)}{rr}"
             # 4行补公式：模板部分共享公式在xml中会丢失，按列规则强制补齐R1-R4
             if use_4:
-                c_ag = header_map.get("头程运费总价")
-                c_ai = header_map.get("出库费")
-                c_ak = header_map.get("其他")
-                c_al = header_map.get("每套运费成本")
+                # 这里不能用 header_map 按表头取列，因为模板里“其他”表头有重复，最后会错误指到 BS 列。
+                c_ag = column_index_from_string("AG")
+                c_ai = column_index_from_string("AI")
+                c_ak = column_index_from_string("AK")
+                c_al = column_index_from_string("AL")
                 c_ae = header_map.get("计费重量")
                 c_af = header_map.get("花街单价")
                 c_an = header_map.get("长cm")
