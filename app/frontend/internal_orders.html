@@ -204,6 +204,18 @@
         <button class="btn" id="saveFormulaRulesBtn" style="background:#0f766e;">保存规则</button>
         <button class="btn" id="exportFormulaRulesBtn" style="background:#334155;">导出规则</button>
       </div>
+      <div style="margin-top:14px;">
+        <label style="font-size:12px;color:#64748b;">应用资料库</label>
+        <textarea id="knowledgeBaseInput" rows="12" style="width:100%;margin-top:6px;"></textarea>
+      </div>
+      <div style="margin-top:14px;">
+        <label style="font-size:12px;color:#64748b;">代码流程快照</label>
+        <textarea id="codeSnapshotInput" rows="10" style="width:100%;margin-top:6px;"></textarea>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:10px;">
+        <button class="btn" id="saveKnowledgeBtn" style="background:#0f766e;">保存资料库</button>
+        <button class="btn" id="exportKnowledgeBtn" style="background:#334155;">导出资料库</button>
+      </div>
     </div>
   </div>
   <div class="filter-pop" id="colFilterPop">
@@ -249,6 +261,8 @@
     const saveExchangeRateBtn = document.getElementById("saveExchangeRateBtn");
     const settingsModal = document.getElementById("settingsModal");
     const formulaRulesInput = document.getElementById("formulaRulesInput");
+    const knowledgeBaseInput = document.getElementById("knowledgeBaseInput");
+    const codeSnapshotInput = document.getElementById("codeSnapshotInput");
     let quickStatus = "";
     let autoEnrichRunning = false;
     let lastAutoEnrichAt = 0;
@@ -1803,13 +1817,19 @@
         if (res.ok && !out.detail) {
           if (out.exchange_rate) exchangeRateInput.value = String(out.exchange_rate);
           formulaRulesInput.value = String(out.formula_rules || "");
+          knowledgeBaseInput.value = String(out.knowledge_base || "");
+          codeSnapshotInput.value = String(out.code_snapshot || "");
         } else {
           if (!exchangeRateInput.value) exchangeRateInput.value = "7";
           if (!formulaRulesInput.value) formulaRulesInput.value = "";
+          if (!knowledgeBaseInput.value) knowledgeBaseInput.value = "";
+          if (!codeSnapshotInput.value) codeSnapshotInput.value = "";
         }
       } catch (_) {
         if (!exchangeRateInput.value) exchangeRateInput.value = "7";
         if (!formulaRulesInput.value) formulaRulesInput.value = "";
+        if (!knowledgeBaseInput.value) knowledgeBaseInput.value = "";
+        if (!codeSnapshotInput.value) codeSnapshotInput.value = "";
       }
     }
     saveExchangeRateBtn.addEventListener("click", async () => {
@@ -1867,7 +1887,12 @@
       const res = await fetch("/internal-orders/settings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ exchange_rate: v, formula_rules: formulaRulesInput.value || "" }),
+        body: JSON.stringify({
+          exchange_rate: v,
+          formula_rules: formulaRulesInput.value || "",
+          knowledge_base: knowledgeBaseInput.value || "",
+          code_snapshot: codeSnapshotInput.value || "",
+        }),
       });
       const out = await res.json().catch(() => ({}));
       if (!res.ok || out.detail) {
@@ -1875,6 +1900,8 @@
         return;
       }
       formulaRulesInput.value = String(out.formula_rules || "");
+      knowledgeBaseInput.value = String(out.knowledge_base || "");
+      codeSnapshotInput.value = String(out.code_snapshot || "");
       exchangeRateInput.value = String(out.exchange_rate || v);
       alert("规则已保存");
     });
@@ -1883,6 +1910,40 @@
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
       a.download = "internal_order_formula_rules.txt";
+      a.click();
+      URL.revokeObjectURL(a.href);
+    });
+    document.getElementById("saveKnowledgeBtn").addEventListener("click", async () => {
+      const v = Number(exchangeRateInput.value);
+      if (!Number.isFinite(v) || v <= 0 || v > 100) {
+        alert("汇率格式错误，请输入数字（0~100）");
+        return;
+      }
+      const res = await fetch("/internal-orders/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          exchange_rate: v,
+          formula_rules: formulaRulesInput.value || "",
+          knowledge_base: knowledgeBaseInput.value || "",
+          code_snapshot: codeSnapshotInput.value || "",
+        }),
+      });
+      const out = await res.json().catch(() => ({}));
+      if (!res.ok || out.detail) {
+        alert(`资料库保存失败: ${JSON.stringify(out.detail || out)}`);
+        return;
+      }
+      knowledgeBaseInput.value = String(out.knowledge_base || "");
+      codeSnapshotInput.value = String(out.code_snapshot || "");
+      alert("资料库已保存");
+    });
+    document.getElementById("exportKnowledgeBtn").addEventListener("click", () => {
+      const text = `应用资料库\\n\\n${knowledgeBaseInput.value || ""}\\n\\n代码流程快照\\n\\n${codeSnapshotInput.value || ""}`;
+      const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "internal_order_knowledge_base.txt";
       a.click();
       URL.revokeObjectURL(a.href);
     });

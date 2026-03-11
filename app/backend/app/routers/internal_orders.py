@@ -62,6 +62,56 @@ BD（总成本）
 BF（利润）
 = BE * 汇率 - BD
 """
+DEFAULT_KNOWLEDGE_BASE = """应用资料库（持久化）
+
+1. 内部订单主流程
+- 领星 mws/orders 拉订单主数据
+- mws/orderDetail 回补 ASIN、SKU、图片、发货日、送达日、购买日期
+- pb/mp/order/v2/list 回补买家地址、联系人、电话、地址二三行
+- 已抓到的地址信息长期保存；超过 28 天抓不到新数据时，不覆盖旧值
+
+2. 多 SKU 规则
+- 同订单号 + 同 SKU：合并数量
+- 同订单号 + 不同 SKU：拆成多行，买家信息共享，售价/标题/SKU 各自独立
+
+3. 日期规则
+- 发货日/送达日优先使用 mws/orderDetail
+- UTC 时间先转 America/Los_Angeles，再生成 PDT/PST
+- 不使用 pb/mp 平台层 delivery_time 推导 Amazon 送达日
+
+4. 地址规则
+- 地址块格式：收件人 / 地址1 / 地址2或地址3 / 城市州邮编 / 国家 / 地址类型 / 联系买家 / 电话
+- 联系买家优先 buyer_name / buyers_info.buyer_name
+
+5. 导出规则
+- 3行/4行模板基于 docs/inputs/internal_orders.xlsx
+- BU 列以后不输出内容与边框
+- BP/BQ/BR 不保留 DISPIMG 公式，导出留空
+- AL、BD、BF 等关键公式按代码强制回填
+
+6. 定时任务
+- 每 30 分钟自动增量同步
+- 每天中国时间 09:00 全量同步
+- 新增订单后自动补全买家信息
+
+7. 重要持久化
+- internal_order_ext.fields 保存扩展字段
+- internal_orders_settings 保存汇率、公式规则、资料库与流程快照
+"""
+DEFAULT_CODE_SNAPSHOT = """当前关键实现快照
+
+- 内部订单列表：/app/frontend/internal_orders.html
+- 内部订单后端：/app/backend/app/routers/internal_orders.py
+- 同步服务：/app/backend/app/services.py
+- 认证：/app/backend/app/routers/auth.py
+
+关键行为：
+- 地址二行/三行显示
+- 联系买家与收件人分离
+- 4行订单导出规则
+- 送达日按 LA 时区修正
+- 设置页支持修改密码、汇率、公式规则、资料库
+"""
 
 
 def _map_shop_name(v: str | None) -> str:
@@ -81,6 +131,17 @@ def _get_exchange_rate(db: Session) -> float:
         except Exception:
             pass
     return DEFAULT_EXCHANGE_RATE
+
+
+def _get_internal_order_settings(db: Session) -> dict:
+    cfg = crud.get_config(db, "internal_orders_settings")
+    value = cfg.config_value if cfg and isinstance(cfg.config_value, dict) else {}
+    return {
+        "exchange_rate": float(value.get("exchange_rate") or DEFAULT_EXCHANGE_RATE),
+        "formula_rules": str(value.get("formula_rules") or DEFAULT_FORMULA_RULES),
+        "knowledge_base": str(value.get("knowledge_base") or DEFAULT_KNOWLEDGE_BASE),
+        "code_snapshot": str(value.get("code_snapshot") or DEFAULT_CODE_SNAPSHOT),
+    }
 
 
 def _get_internal_order_settings(db: Session) -> dict:
@@ -1039,7 +1100,14 @@ def set_internal_order_settings(payload: dict, db: Session = Depends(get_db)):
     if rate <= 0 or rate > 100:
         raise HTTPException(status_code=400, detail="exchange_rate out of range")
     formula_rules = str(payload.get("formula_rules") or current["formula_rules"] or "").strip() or DEFAULT_FORMULA_RULES
-    value = {"exchange_rate": rate, "formula_rules": formula_rules}
+    knowledge_base = str(payload.get("knowledge_base") or current["knowledge_base"] or "").strip() or DEFAULT_KNOWLEDGE_BASE
+    code_snapshot = str(payload.get("code_snapshot") or current["code_snapshot"] or "").strip() or DEFAULT_CODE_SNAPSHOT
+    value = {
+        "exchange_rate": rate,
+        "formula_rules": formula_rules,
+        "knowledge_base": knowledge_base,
+        "code_snapshot": code_snapshot,
+    }
     crud.set_config(db, "internal_orders_settings", value)
     return {"ok": True, **value}
 
