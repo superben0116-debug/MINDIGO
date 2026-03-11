@@ -1522,9 +1522,9 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
                         parts.append(f"{get_column_letter(c_ai)}{r}")
                     if c_ak:
                         parts.append(f"{get_column_letter(c_ak)}{r}")
-                    # 4行模板中 AI/AK 位于合并行，仅首行保留；R1-R3 的 AG 需要按三行数量累计
-                    parts.append(f"{get_column_letter(c_ag)}{r}")
-                    parts.append(f"{get_column_letter(c_ag)}{r}")
+                    # 4行模板中 AI/AK 位于首行；R1-R3 的 AG 分别取实际三行
+                    parts.append(f"{get_column_letter(c_ag)}{r+1}")
+                    parts.append(f"{get_column_letter(c_ag)}{r+2}")
                     ws.cell(r, c_al).value = "=" + "+".join(parts)
                     tail_parts = [f"{get_column_letter(c_ag)}{tail}"]
                     if c_ai:
