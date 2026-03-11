@@ -83,6 +83,23 @@ def me(request: Request, db: Session = Depends(get_db)):
     }
 
 
+@router.post("/me/password")
+def update_my_password(payload: dict, request: Request, db: Session = Depends(get_db)):
+    user = get_current_user(request, db)
+    current_password = str(payload.get("current_password") or "")
+    new_password = str(payload.get("new_password") or "").strip()
+    if not current_password or not new_password:
+        raise HTTPException(status_code=400, detail="missing current_password/new_password")
+    if not verify_password(current_password, user.password_hash):
+        raise HTTPException(status_code=400, detail="invalid_current_password")
+    if len(new_password) < 4:
+        raise HTTPException(status_code=400, detail="password_too_short")
+    user.password_hash = make_password_hash(new_password)
+    user.updated_at = datetime.utcnow()
+    db.commit()
+    return {"ok": True}
+
+
 @router.get("/users")
 def list_users(request: Request, db: Session = Depends(get_db)):
     require_admin(request, db)

@@ -45,6 +45,23 @@ DEFAULT_EXCHANGE_RATE = 7.0
 _POLICY_LIMIT_MARKERS = (
     "应亚马逊政策要求，仅返回订购时间28天内数据",
 )
+DEFAULT_FORMULA_RULES = """AL（每套运费成本）
+3行订单：
+R1 = AG+AI+AK
+R2 合并到 R1
+R3 = AG
+
+4行订单：
+R1-R3 合并显示
+合并格公式 = (AG+AI+AK)@R1 + (AG+AI+AK)@R2 + (AG+AI+AK)@R3
+R4 = AG+AI+AK
+
+BD（总成本）
+= Q首行 + AL首行 + BC首行 + AL尾行
+
+BF（利润）
+= BE * 汇率 - BD
+"""
 
 
 def _map_shop_name(v: str | None) -> str:
@@ -64,6 +81,15 @@ def _get_exchange_rate(db: Session) -> float:
         except Exception:
             pass
     return DEFAULT_EXCHANGE_RATE
+
+
+def _get_internal_order_settings(db: Session) -> dict:
+    cfg = crud.get_config(db, "internal_orders_settings")
+    value = cfg.config_value if cfg and isinstance(cfg.config_value, dict) else {}
+    return {
+        "exchange_rate": float(value.get("exchange_rate") or DEFAULT_EXCHANGE_RATE),
+        "formula_rules": str(value.get("formula_rules") or DEFAULT_FORMULA_RULES),
+    }
 
 
 def _needs_address_refresh(order: models.InternalOrder, ext_fields: dict) -> bool:
@@ -90,13 +116,21 @@ def _maybe_enrich_orders_for_view(db: Session, orders: list[models.InternalOrder
     if not orders:
         return
     pending = []
+    pending_detail = []
     for order in orders:
         ext_obj = crud.get_order_ext(db, order.id)
         ext_fields = dict(ext_obj.fields or {}) if ext_obj and isinstance(ext_obj.fields, dict) else {}
         if _needs_address_refresh(order, ext_fields):
             pending.append(order.platform_order_no)
+        delivery_missing = not _clean_text(ext_fields.get("送达日")) and not (
+            _clean_text(ext_fields.get("earliest_delivery_date")) and _clean_text(ext_fields.get("latest_delivery_date"))
+        )
+        ship_missing = not _clean_text(ext_fields.get("发货日")) and not _clean_text(ext_fields.get("latest_ship_date"))
+        if order.platform_order_no and (delivery_missing or ship_missing):
+            pending_detail.append(order.platform_order_no)
     pending = [x for x in dict.fromkeys(pending) if x]
-    if not pending:
+    pending_detail = [x for x in dict.fromkeys(pending_detail) if x]
+    if not pending and not pending_detail:
         return
     cfg = get_lingxing_config(db)
     app_id = str(cfg.get("app_id") or "").strip()
@@ -112,6 +146,28 @@ def _maybe_enrich_orders_for_view(db: Session, orders: list[models.InternalOrder
         return
     for i in range(0, len(pending), 200):
         _enrich_orders_from_mp_list(db, access_token, app_id, "", pending[i:i+200])
+    for i in range(0, len(pending_detail), 200):
+        detail = get_mws_order_detail(access_token, app_id, pending_detail[i:i+200])
+        if detail.get("code") != 0:
+            continue
+        for d in detail.get("data", []) or []:
+            amazon_order_id = d.get("amazon_order_id")
+            order = crud.get_order_by_platform_no(db, amazon_order_id)
+            if not order:
+                continue
+            ext_update = {}
+            if d.get("latest_ship_date"):
+                ext_update["latest_ship_date"] = d.get("latest_ship_date")
+                ext_update["amz_ship"] = d.get("latest_ship_date")
+            if d.get("earliest_delivery_date"):
+                ext_update["earliest_delivery_date"] = d.get("earliest_delivery_date")
+            if d.get("latest_delivery_date"):
+                ext_update["latest_delivery_date"] = d.get("latest_delivery_date")
+                ext_update["amz_deliver"] = f"{d.get('earliest_delivery_date','')} - {d.get('latest_delivery_date','')}".strip(" -")
+            if d.get("purchase_date_local"):
+                ext_update["purchase_date_local"] = d.get("purchase_date_local")
+            if ext_update:
+                crud.upsert_order_ext_bulk(db, order.id, ext_update)
 
 
 def _to_ymd(v):
@@ -969,19 +1025,23 @@ def list_internal_orders(limit: int = 50, offset: int = 0, db: Session = Depends
 
 @router.get("/settings")
 def get_internal_order_settings(db: Session = Depends(get_db)):
-    return {"exchange_rate": _get_exchange_rate(db)}
+    return _get_internal_order_settings(db)
 
 
 @router.post("/settings")
 def set_internal_order_settings(payload: dict, db: Session = Depends(get_db)):
+    current = _get_internal_order_settings(db)
+    rate_raw = payload.get("exchange_rate", current["exchange_rate"])
     try:
-        rate = float(payload.get("exchange_rate"))
+        rate = float(rate_raw)
     except Exception:
         raise HTTPException(status_code=400, detail="invalid exchange_rate")
     if rate <= 0 or rate > 100:
         raise HTTPException(status_code=400, detail="exchange_rate out of range")
-    crud.set_config(db, "internal_orders_settings", {"exchange_rate": rate})
-    return {"ok": True, "exchange_rate": rate}
+    formula_rules = str(payload.get("formula_rules") or current["formula_rules"] or "").strip() or DEFAULT_FORMULA_RULES
+    value = {"exchange_rate": rate, "formula_rules": formula_rules}
+    crud.set_config(db, "internal_orders_settings", value)
+    return {"ok": True, **value}
 
 
 @router.post("/export-selected")
@@ -1457,15 +1517,16 @@ def export_selected_orders(payload: dict, db: Session = Depends(get_db)):
                 if c_al and c_ag:
                     r = start_row
                     tail = start_row + 3
-                    parts = [f"{get_column_letter(c_ag)}{r}"]
-                    if c_ai:
-                        parts.append(f"{get_column_letter(c_ai)}{r}")
-                    if c_ak:
-                        parts.append(f"{get_column_letter(c_ak)}{r}")
-                    parts.append(f"{get_column_letter(c_ag)}{r+1}")
-                    parts.append(f"{get_column_letter(c_ag)}{r+2}")
+                    def _cost_terms(rr: int) -> list[str]:
+                        vals = [f"{get_column_letter(c_ag)}{rr}"]
+                        if c_ai:
+                            vals.append(f"{get_column_letter(c_ai)}{rr}")
+                        if c_ak:
+                            vals.append(f"{get_column_letter(c_ak)}{rr}")
+                        return vals
+                    parts = _cost_terms(r) + _cost_terms(r + 1) + _cost_terms(r + 2)
                     ws.cell(r, c_al).value = "=" + "+".join(parts)
-                    ws.cell(tail, c_al).value = f"={get_column_letter(c_ag)}{tail}"
+                    ws.cell(tail, c_al).value = "=" + "+".join(_cost_terms(tail))
             # split lines
             name_col = header_map.get("产品名")
             marks_col = header_map.get("箱唛")

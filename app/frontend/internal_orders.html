@@ -79,6 +79,7 @@
         <div class="title-row">
           <h1>内部订单中心</h1>
           <div style="display:flex;gap:8px;">
+            <button class="btn" id="settingsBtn" style="background:#475569;">设置</button>
             <button class="btn" id="exportBtn">导出卡派</button>
             <button class="btn" id="downloadBtn" style="background:#0f766e;">下载订单</button>
           </div>
@@ -176,6 +177,35 @@
       <button class="btn" id="pasteSubmitBtn" style="margin-top:10px;">导入</button>
     </div>
   </div>
+  <div class="modal" id="settingsModal">
+    <div class="card" style="min-width:360px;max-width:760px;width:90vw;">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <strong>内部订单设置</strong>
+        <button class="btn" id="settingsCloseBtn">关闭</button>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px;">
+        <div>
+          <label style="font-size:12px;color:#64748b;">当前密码</label>
+          <input id="currentPasswordInput" type="password" placeholder="当前密码" style="width:100%;" />
+        </div>
+        <div>
+          <label style="font-size:12px;color:#64748b;">新密码</label>
+          <input id="newPasswordInput" type="password" placeholder="新密码" style="width:100%;" />
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:10px;">
+        <button class="btn" id="savePasswordBtn">保存密码</button>
+      </div>
+      <div style="margin-top:14px;">
+        <label style="font-size:12px;color:#64748b;">导出公式规则</label>
+        <textarea id="formulaRulesInput" rows="12" style="width:100%;margin-top:6px;"></textarea>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:10px;">
+        <button class="btn" id="saveFormulaRulesBtn" style="background:#0f766e;">保存规则</button>
+        <button class="btn" id="exportFormulaRulesBtn" style="background:#334155;">导出规则</button>
+      </div>
+    </div>
+  </div>
   <div class="filter-pop" id="colFilterPop">
     <strong id="filterTitle" style="font-size:12px;"></strong>
     <label>筛选类型</label>
@@ -201,6 +231,7 @@
     const rowsEl = document.getElementById("orderRows");
     const exportBtn = document.getElementById("exportBtn");
     const downloadBtn = document.getElementById("downloadBtn");
+    const settingsBtn = document.getElementById("settingsBtn");
     const headerRow = document.getElementById("headerRow");
     const filterBtn = document.getElementById("filterBtn");
     const todayChip = document.getElementById("todayChip");
@@ -216,6 +247,8 @@
     const viewSelect = document.getElementById("viewSelect");
     const exchangeRateInput = document.getElementById("exchangeRateInput");
     const saveExchangeRateBtn = document.getElementById("saveExchangeRateBtn");
+    const settingsModal = document.getElementById("settingsModal");
+    const formulaRulesInput = document.getElementById("formulaRulesInput");
     let quickStatus = "";
     let autoEnrichRunning = false;
     let lastAutoEnrichAt = 0;
@@ -1767,13 +1800,16 @@
       try {
         const res = await fetch("/internal-orders/settings");
         const out = await res.json();
-        if (res.ok && !out.detail && out.exchange_rate) {
-          exchangeRateInput.value = String(out.exchange_rate);
-        } else if (!exchangeRateInput.value) {
-          exchangeRateInput.value = "7";
+        if (res.ok && !out.detail) {
+          if (out.exchange_rate) exchangeRateInput.value = String(out.exchange_rate);
+          formulaRulesInput.value = String(out.formula_rules || "");
+        } else {
+          if (!exchangeRateInput.value) exchangeRateInput.value = "7";
+          if (!formulaRulesInput.value) formulaRulesInput.value = "";
         }
       } catch (_) {
         if (!exchangeRateInput.value) exchangeRateInput.value = "7";
+        if (!formulaRulesInput.value) formulaRulesInput.value = "";
       }
     }
     saveExchangeRateBtn.addEventListener("click", async () => {
@@ -1793,6 +1829,62 @@
         return;
       }
       alert(`汇率已保存: ${out.exchange_rate}`);
+    });
+    settingsBtn.addEventListener("click", async () => {
+      await loadInternalOrderSettings();
+      settingsModal.style.display = "flex";
+    });
+    document.getElementById("settingsCloseBtn").addEventListener("click", () => {
+      settingsModal.style.display = "none";
+    });
+    document.getElementById("savePasswordBtn").addEventListener("click", async () => {
+      const currentPassword = document.getElementById("currentPasswordInput").value;
+      const newPassword = document.getElementById("newPasswordInput").value;
+      if (!currentPassword || !newPassword) {
+        alert("请填写当前密码和新密码");
+        return;
+      }
+      const res = await fetch("/auth/me/password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+      });
+      const out = await res.json().catch(() => ({}));
+      if (!res.ok || out.detail) {
+        alert(`密码保存失败: ${JSON.stringify(out.detail || out)}`);
+        return;
+      }
+      document.getElementById("currentPasswordInput").value = "";
+      document.getElementById("newPasswordInput").value = "";
+      alert("密码已更新");
+    });
+    document.getElementById("saveFormulaRulesBtn").addEventListener("click", async () => {
+      const v = Number(exchangeRateInput.value);
+      if (!Number.isFinite(v) || v <= 0 || v > 100) {
+        alert("汇率格式错误，请输入数字（0~100）");
+        return;
+      }
+      const res = await fetch("/internal-orders/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ exchange_rate: v, formula_rules: formulaRulesInput.value || "" }),
+      });
+      const out = await res.json().catch(() => ({}));
+      if (!res.ok || out.detail) {
+        alert(`规则保存失败: ${JSON.stringify(out.detail || out)}`);
+        return;
+      }
+      formulaRulesInput.value = String(out.formula_rules || "");
+      exchangeRateInput.value = String(out.exchange_rate || v);
+      alert("规则已保存");
+    });
+    document.getElementById("exportFormulaRulesBtn").addEventListener("click", () => {
+      const blob = new Blob([formulaRulesInput.value || ""], { type: "text/plain;charset=utf-8" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "internal_order_formula_rules.txt";
+      a.click();
+      URL.revokeObjectURL(a.href);
     });
     document.getElementById("statusUnshippedBtn").addEventListener("click", () => applyQuickStatus("unshipped"));
     document.getElementById("statusPendingBtn").addEventListener("click", () => applyQuickStatus("pending"));
