@@ -80,6 +80,7 @@ def lingxing_network_test():
 
 @router.post("/sync-fbm-orders")
 def sync_orders(db: Session = Depends(get_db)):
+    crud.fail_stale_import_jobs(db, "lingxing_fbm", timeout_minutes=20)
     job = crud.create_import_job(db, "lingxing_fbm")
     thread = threading.Thread(target=execute_sync_job, args=(job.id,), daemon=True)
     thread.start()
@@ -91,16 +92,33 @@ def sync_orders_now(db: Session = Depends(get_db)):
     """
     同步执行：用于“一键更新订单和状态”立刻拉取最新订单并等待完成。
     """
+    crud.fail_stale_import_jobs(db, "lingxing_fbm", timeout_minutes=20)
+    cfg_obj = crud.get_config(db, "lingxing")
+    backup_cfg = None
+    if cfg_obj and isinstance(cfg_obj.config_value, dict):
+        backup_cfg = dict(cfg_obj.config_value)
+        forced_cfg = dict(cfg_obj.config_value)
+        forced_cfg["auto_rolling_window"] = 1
+        forced_cfg["rolling_days"] = max(int(forced_cfg.get("rolling_days") or 30), 45)
+        forced_cfg["use_mws_orders"] = 1
+        forced_cfg["use_all_orders_report"] = 1
+        forced_cfg["mws_date_types"] = "2,1"
+        forced_cfg["all_orders_date_types"] = "1,2"
+        crud.set_config(db, "lingxing", forced_cfg)
     job = crud.create_import_job(db, "lingxing_fbm")
-    execute_sync_job(job.id)
-    latest = db.query(models.ImportJob).filter(models.ImportJob.id == job.id).first()
-    return {
-        "job_id": job.id,
-        "status": latest.status if latest else "done",
-        "success": latest.success_count if latest else 0,
-        "failed": latest.failed_count if latest else 0,
-        "error_summary": latest.error_summary if latest else "",
-    }
+    try:
+        execute_sync_job(job.id)
+        latest = db.query(models.ImportJob).filter(models.ImportJob.id == job.id).first()
+        return {
+            "job_id": job.id,
+            "status": latest.status if latest else "done",
+            "success": latest.success_count if latest else 0,
+            "failed": latest.failed_count if latest else 0,
+            "error_summary": latest.error_summary if latest else "",
+        }
+    finally:
+        if backup_cfg is not None:
+            crud.set_config(db, "lingxing", backup_cfg)
 
 
 @router.get("/sync-fbm-orders")

@@ -1,4 +1,5 @@
 from datetime import datetime
+from datetime import timedelta
 from typing import Dict, List, Optional
 from sqlalchemy.orm import Session
 from app import models
@@ -297,6 +298,35 @@ def create_import_job(db: Session, job_type: str) -> models.ImportJob:
     db.commit()
     db.refresh(obj)
     return obj
+
+
+def fail_stale_import_jobs(db: Session, job_type: str, timeout_minutes: int = 20) -> int:
+    """
+    将长时间卡住的 queued/running 任务标记为 failed，避免后续自动/手动同步被阻塞。
+    """
+    cutoff = datetime.utcnow() - timedelta(minutes=max(1, timeout_minutes))
+    rows = (
+        db.query(models.ImportJob)
+        .filter(
+            models.ImportJob.job_type == job_type,
+            models.ImportJob.status.in_(["queued", "running"]),
+            models.ImportJob.start_time.isnot(None),
+            models.ImportJob.start_time < cutoff,
+        )
+        .all()
+    )
+    changed = 0
+    now = datetime.utcnow()
+    for row in rows:
+        row.status = "failed"
+        row.end_time = now
+        current = str(row.error_summary or "").strip()
+        prefix = "stale job auto-closed"
+        row.error_summary = f"{prefix}; {current}" if current else prefix
+        changed += 1
+    if changed:
+        db.commit()
+    return changed
 
 
 def update_import_job(db: Session, job_id: int, success: int, failed: int, status: str, error_summary: Optional[str] = None):

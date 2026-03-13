@@ -60,6 +60,7 @@ def _auto_sync_loop():
     next_regular_run_at = time.time()
 
     def _has_running_job(db):
+        crud.fail_stale_import_jobs(db, "lingxing_fbm", timeout_minutes=max(interval_min * 2, 20))
         return (
             db.query(models.ImportJob.id)
             .filter(
