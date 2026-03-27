@@ -153,15 +153,6 @@ def _get_internal_order_settings(db: Session) -> dict:
     }
 
 
-def _get_internal_order_settings(db: Session) -> dict:
-    cfg = crud.get_config(db, "internal_orders_settings")
-    value = cfg.config_value if cfg and isinstance(cfg.config_value, dict) else {}
-    return {
-        "exchange_rate": float(value.get("exchange_rate") or DEFAULT_EXCHANGE_RATE),
-        "formula_rules": str(value.get("formula_rules") or DEFAULT_FORMULA_RULES),
-    }
-
-
 def _needs_address_refresh(order: models.InternalOrder, ext_fields: dict) -> bool:
     if not order.platform_order_no:
         return False

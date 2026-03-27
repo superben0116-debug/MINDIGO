@@ -76,3 +76,7 @@
 - 若会话归档或模型崩溃，优先读取：
   - 本文件
   - `internal_orders_settings`
+
+## 10. 项目进度快照
+- 2026-03-28 最新进度备份：
+  - `/Users/baicai/Downloads/终极 ERP/docs/project_progress_2026-03-28.md`
