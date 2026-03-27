@@ -9,6 +9,7 @@ from app.auth import (
     create_session,
     delete_session,
     get_current_user,
+    get_cookie_settings,
     require_admin,
     verify_password,
     make_password_hash,
@@ -40,13 +41,14 @@ def login(payload: dict, response: Response, db: Session = Depends(get_db)):
     if expect_role and user.role != expect_role:
         raise HTTPException(status_code=403, detail="role_mismatch")
     sess = create_session(db, user.id)
-    cookie_secure = str(os.getenv("ERP_COOKIE_SECURE", "0")).strip().lower() in ("1", "true", "yes")
+    cookie_settings = get_cookie_settings()
     response.set_cookie(
         key=SESSION_COOKIE,
         value=sess.token,
         httponly=True,
-        samesite="lax",
-        secure=cookie_secure,
+        samesite=cookie_settings["samesite"],
+        secure=cookie_settings["secure"],
+        domain=cookie_settings["domain"],
         path="/",
         max_age=7 * 24 * 3600,
     )
@@ -65,7 +67,8 @@ def login(payload: dict, response: Response, db: Session = Depends(get_db)):
 def logout(request: Request, response: Response, db: Session = Depends(get_db)):
     token = request.cookies.get(SESSION_COOKIE) or ""
     delete_session(db, token)
-    response.delete_cookie(SESSION_COOKIE, path="/")
+    cookie_settings = get_cookie_settings()
+    response.delete_cookie(SESSION_COOKIE, path="/", domain=cookie_settings["domain"])
     return {"ok": True}
 
 

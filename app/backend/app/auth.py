@@ -10,6 +10,21 @@ SESSION_COOKIE = "erp_session"
 SESSION_HOURS = 24 * 7
 
 
+def get_cookie_settings() -> dict:
+    secure = str(os.getenv("ERP_COOKIE_SECURE", "0")).strip().lower() in ("1", "true", "yes")
+    same_site = str(os.getenv("ERP_COOKIE_SAMESITE", "lax")).strip().lower() or "lax"
+    if same_site not in ("lax", "strict", "none"):
+        same_site = "lax"
+    if same_site == "none":
+        secure = True
+    domain = str(os.getenv("ERP_COOKIE_DOMAIN", "")).strip() or None
+    return {
+        "secure": secure,
+        "samesite": same_site,
+        "domain": domain,
+    }
+
+
 def _hash_password(password: str, salt: str) -> str:
     dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), 120000)
     return dk.hex()

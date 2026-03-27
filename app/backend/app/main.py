@@ -25,6 +25,7 @@ from app.routers.lingxing_tools import router as lingxing_tools_router
 from app.routers.import_jobs import router as import_jobs_router
 from app.routers.auth import router as auth_router
 from app.routers.customer_service import router as customer_service_router
+from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(title="Ultimate ERP")
 _auto_sync_started = False
@@ -39,6 +40,18 @@ def _is_truthy(v: str | None) -> bool:
 def _looks_placeholder(v: str | None) -> bool:
     s = str(v or "").strip().lower()
     return s in ("", "app_id", "access_token", "sid1")
+
+
+def _parse_cors_origins() -> list[str]:
+    raw = os.getenv("ERP_CORS_ORIGINS", "").strip()
+    if not raw:
+        return []
+    origins = []
+    for item in raw.split(","):
+        origin = item.strip()
+        if origin:
+            origins.append(origin)
+    return origins
 
 
 def _config_ready_for_sync(cfg: dict) -> bool:
@@ -187,6 +200,16 @@ class UINoCacheMiddleware(BaseHTTPMiddleware):
 
 
 app.add_middleware(UINoCacheMiddleware)
+
+cors_origins = _parse_cors_origins()
+if cors_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=cors_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 app.include_router(lingxing_router, prefix="/integrations/lingxing", tags=["lingxing"])
 app.include_router(auth_router, prefix="/auth", tags=["auth"])

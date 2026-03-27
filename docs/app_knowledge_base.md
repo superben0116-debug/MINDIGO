@@ -80,3 +80,11 @@
 ## 10. 项目进度快照
 - 2026-03-28 最新进度备份：
   - `/Users/baicai/Downloads/终极 ERP/docs/project_progress_2026-03-28.md`
+
+## 11. 登录跨地区部署
+- 登录会话可通过环境变量配置：
+  - `ERP_COOKIE_SECURE=1`
+  - `ERP_COOKIE_SAMESITE=none`
+  - `ERP_COOKIE_DOMAIN=你的正式域名`
+  - `ERP_CORS_ORIGINS=https://你的正式域名`
+- 这些配置不会影响数据库数据，只影响登录态与浏览器跨域兼容。
