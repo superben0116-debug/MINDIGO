@@ -7,4 +7,4 @@ cmds = [
 ]
 
 [start]
-cmd = "cd app/backend && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"
+cmd = "sh app/backend/start.sh"
